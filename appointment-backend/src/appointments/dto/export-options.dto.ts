@@ -1,12 +1,15 @@
-import { IsOptional, IsString, IsIn } from 'class-validator';
+import { IsOptional, IsDateString, IsIn } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class ExportOptionsDto {
   @IsOptional()
-  @IsString()
+  @Transform(({ value }) => value === '' ? undefined : value)
+  @IsDateString()
   startDate?: string;
 
   @IsOptional()
-  @IsString()
+  @Transform(({ value }) => value === '' ? undefined : value)
+  @IsDateString()
   endDate?: string;
 
   @IsOptional()

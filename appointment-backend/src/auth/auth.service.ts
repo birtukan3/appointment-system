@@ -1,70 +1,81 @@
-﻿import { Injectable, UnauthorizedException } from '@nestjs/common';
+﻿import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { UsersService } from '../users/users.service';
-import * as bcrypt from 'bcrypt';
-import { CreateUserDto } from '../users/dto/create-user.dto';
-import { LoginDto } from '../users/dto/login.dto';
+import * as bcrypt from 'bcryptjs';
+import { User } from '../users/user.entity';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private jwtService: JwtService,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<any> {
-    // 🔥 FIX: Email is already normalized in usersService.findByEmail
-    const user = await this.usersService.findByEmail(email);
+  async register(email: string, password: string, name: string, company?: string, phone?: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+    
+    const existing = await this.userRepository.findOne({ where: { email: normalizedEmail } });
+    if (existing) {
+      throw new ConflictException('Email already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const user = this.userRepository.create({
+      name,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: 'user',
+      company: company || '',
+      phone: phone || '',
+      isActive: true,
+    });
+    
+    await this.userRepository.save(user);
+    
+    const { password: _, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+
+  async login(email: string, password: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
     
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid email or password');
     }
-
+    
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is deactivated');
+    }
+    
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid email or password');
     }
-
-    const { password: _, ...result } = user;
-    return result;
+    
+    user.lastLogin = new Date();
+    await this.userRepository.save(user);
+    
+    const payload = { userId: user.id, email: user.email, role: user.role, name: user.name };
+    const token = this.jwtService.sign(payload);
+    
+    const { password: _, ...userWithoutPassword } = user;
+    
+    return { token, user: userWithoutPassword };
   }
 
-  async login(loginDto: LoginDto) {
-    const user = await this.validateUser(loginDto.email, loginDto.password);
-    
-    const payload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-    };
+  async forgotPassword(email: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
 
     return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        company: user.company,
-      },
-    };
-  }
-
-  async register(createUserDto: CreateUserDto) {
-    const user = await this.usersService.create(createUserDto);
-    
-    const payload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-    };
-
-    return {
-      access_token: this.jwtService.sign(payload),
-      user,
+      success: true,
+      message: user
+        ? 'Password recovery request received. Please contact an administrator to complete the reset.'
+        : 'If an account exists for that email, password recovery guidance will be provided.',
     };
   }
 }

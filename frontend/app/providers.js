@@ -10,6 +10,7 @@ export const AppContext = createContext();
 export default function Providers({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -21,7 +22,6 @@ export default function Providers({ children }) {
         setUser(userData);
         api.setToken(token);
       } catch (error) {
-        console.error("Failed to parse user data:", error);
         localStorage.removeItem("token");
         localStorage.removeItem("user");
       }
@@ -32,16 +32,23 @@ export default function Providers({ children }) {
   const login = async (email, password) => {
     try {
       const response = await api.post("/auth/login", { email, password });
-      const { access_token, user } = response.data;
       
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("user", JSON.stringify(user));
-      api.setToken(access_token);
-      setUser(user);
+      if (!response.data.success) {
+        throw new Error(response.data.message || "Login failed");
+      }
       
-      return user;
+      const { token, user: userData } = response.data;
+      
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", JSON.stringify(userData));
+      api.setToken(token);
+      setUser(userData);
+      
+      return userData;
     } catch (error) {
-      console.error("Login error:", error);
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message);
+      }
       throw error;
     }
   };
@@ -52,18 +59,33 @@ export default function Providers({ children }) {
     api.setToken(null);
     setUser(null);
     toast.success("Logged out successfully");
+    router.push("/");
   };
 
-  const value = {
-    user,
-    login,
-    logout,
-    isAuthenticated: !!user,
-    hasRole: (role) => user?.role === role,
+  const updateUser = (nextUser) => {
+    setUser((currentUser) => {
+      const updatedUser = { ...(currentUser || {}), ...(nextUser || {}) };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      return updatedUser;
+    });
+  };
+
+  const hasRole = (role) => {
+    return user?.role === role;
   };
 
   return (
-    <AppContext.Provider value={value}>
+    <AppContext.Provider
+      value={{
+        user,
+        login,
+        logout,
+        updateUser,
+        isAuthenticated: !!user,
+        hasRole,
+        loading,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );

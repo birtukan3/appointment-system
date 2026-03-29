@@ -1,26 +1,27 @@
-﻿import { IsEmail, IsNotEmpty, MinLength, IsOptional, IsString } from 'class-validator';
+﻿import { IsEmail, IsNotEmpty, MinLength, IsOptional, IsString, IsNumber, IsBoolean, IsArray } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateUserDto {
   @IsNotEmpty()
   @IsString()
-  @MinLength(2)
   name: string;
 
   @IsEmail()
   @IsNotEmpty()
-  @IsString()
-  @Transform(({ value }) => value?.toLowerCase().trim())
+  @Transform(({ value }) => value?.toLowerCase())
   email: string;
 
   @IsNotEmpty()
-  @IsString()
   @MinLength(6)
   password: string;
 
   @IsOptional()
   @IsString()
   role?: string;
+
+  @IsOptional()
+  @IsString()
+  department?: string;
 
   @IsOptional()
   @IsString()
@@ -36,5 +37,29 @@ export class CreateUserDto {
 
   @IsOptional()
   @IsString()
-  department?: string;
+  specialization?: string;
+
+  @IsOptional()
+  @IsNumber()
+  experience?: number;
+
+  @IsOptional()
+  @IsString()
+  qualifications?: string;
+
+  @IsOptional()
+  @IsString()
+  bio?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  availableDays?: string[];
+
+  @IsOptional()
+  workingHours?: any;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

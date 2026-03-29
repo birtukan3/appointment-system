@@ -5,19 +5,15 @@ import Providers from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'SmartOffice',
-  description: 'Professional Appointment Management System',
+  title: 'SmartOffice - Professional Appointment Management',
+  description: 'Smart appointment scheduling and management system for modern offices',
 }
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Providers>
-          <main className="min-h-screen bg-gray-50">
-            {children}
-          </main>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

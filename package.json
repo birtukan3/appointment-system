@@ -1,31 +1,16 @@
 {
-  "dependencies": {
-    "@nestjs/common": "^11.1.16",
-    "@nestjs/core": "^11.1.16",
-    "@nestjs/jwt": "^11.0.2",
-    "@nestjs/passport": "^11.0.5",
-    "@nestjs/testing": "^11.1.16",
-    "@nestjs/typeorm": "^11.0.0",
-    "axios": "^1.13.6",
-    "bcrypt": "^6.0.0",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.15.1",
-    "dotenv": "^17.3.1",
-    "exceljs": "^4.4.0",
-    "express": "^5.2.1",
-    "passport-jwt": "^4.0.1",
-    "pg": "^8.19.0",
-    "typeorm": "^0.3.28"
-  },
-  "devDependencies": {
-    "@types/chai": "^5.2.3",
-    "@types/express": "^5.0.6",
-    "@types/jest": "^30.0.0",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "^25.3.4",
-    "chai": "^6.2.2",
-    "mocha": "^11.7.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+  "name": "appointment-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix appointment-backend run start:dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "npm --prefix appointment-backend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start:frontend": "npm --prefix frontend run start",
+    "start:backend": "npm --prefix appointment-backend run start:prod",
+    "typecheck:backend": "npm --prefix appointment-backend run typecheck",
+    "seed:backend": "npm --prefix appointment-backend run seed"
   }
 }

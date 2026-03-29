@@ -1,6 +1,6 @@
 ﻿import axios from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
 class ApiService {
   constructor() {
@@ -10,12 +10,12 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
+      withCredentials: true,
     })
 
-    // Request interceptor
     this.api.interceptors.request.use(
       (config) => {
-        const token = this.token || localStorage.getItem('token')
+        const token = this.token || this.getStoredToken()
         if (token) {
           config.headers.Authorization = `Bearer ${token}`
         }
@@ -24,15 +24,13 @@ class ApiService {
       (error) => Promise.reject(error)
     )
 
-    // Response interceptor
     this.api.interceptors.response.use(
       (response) => response,
       (error) => {
         if (error.response?.status === 401) {
-          localStorage.removeItem('token')
-          localStorage.removeItem('user')
-          if (typeof window !== 'undefined') {
-            window.location.href = '/login'
+          this.clearSession()
+          if (typeof window !== 'undefined' && !window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+            window.location.assign('/login')
           }
         }
         return Promise.reject(error)
@@ -40,10 +38,25 @@ class ApiService {
     )
   }
 
+  getStoredToken() {
+    if (typeof window === 'undefined') return null
+    return window.localStorage.getItem('token')
+  }
+
+  clearSession() {
+    if (typeof window === 'undefined') return
+    window.localStorage.removeItem('token')
+    window.localStorage.removeItem('user')
+  }
+
   setToken(token) {
     this.token = token
-    if (token) {
-      localStorage.setItem('token', token)
+    if (typeof window !== 'undefined') {
+      if (token) {
+        window.localStorage.setItem('token', token)
+      } else {
+        window.localStorage.removeItem('token')
+      }
     }
   }
 

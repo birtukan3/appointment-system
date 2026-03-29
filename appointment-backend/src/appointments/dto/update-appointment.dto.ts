@@ -1,16 +1,11 @@
-﻿// dtos/appointment.dto.js
-const { IsOptional, IsIn, IsString } = require('class-validator');
+﻿import { IsOptional, IsIn, IsString } from 'class-validator';
 
-class UpdateAppointmentDto {
+export class UpdateAppointmentDto {
   @IsOptional()
-  @IsIn(['Pending', 'Approved', 'Rejected'], { 
-    message: 'Status must be Pending, Approved, or Rejected' 
-  })
-  status;
+  @IsIn(['Pending', 'Approved', 'Rejected'])
+  status?: string;
 
   @IsOptional()
-  @IsString({ message: 'Comment must be a string' })
-  comment;
+  @IsString()
+  comment?: string;
 }
-
-module.exports = { UpdateAppointmentDto };
