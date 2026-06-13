@@ -1,16 +1,17 @@
-{
+﻿{
   "name": "appointment-system",
   "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": "npm --prefix appointment-backend run start:dev",
-    "build:frontend": "npm --prefix frontend run build",
-    "build:backend": "npm --prefix appointment-backend run build",
-    "build": "npm run build:backend && npm run build:frontend",
-    "start:frontend": "npm --prefix frontend run start",
-    "start:backend": "npm --prefix appointment-backend run start:prod",
-    "typecheck:backend": "npm --prefix appointment-backend run typecheck",
-    "seed:backend": "npm --prefix appointment-backend run seed"
-  }
+  "description": "Appointment System - Full Stack Application",
+  "main": "server.js",
+  "contributors": [
+    {
+      "name": "Birtukan",
+      "github": "https://github.com/birtukan3"
+    },
+    {
+      "name": "buka-pitch",
+      "github": "https://github.com/buka-pitch"
+    }
+  ],
+  "license": "MIT"
 }
