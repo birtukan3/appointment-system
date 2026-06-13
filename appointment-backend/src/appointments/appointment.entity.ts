@@ -1,70 +1,125 @@
-﻿import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+﻿import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { User } from '../users/user.entity';
 
+export enum BookingStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  CHECKED_IN = 'checked_in',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  EXPIRED = 'expired',
+  ARCHIVED = 'archived'
+}
+
+export enum BookingPriority {
+  LOW = 'low',
+  NORMAL = 'normal',
+  HIGH = 'high',
+  URGENT = 'urgent'
+}
+
 @Entity('appointments')
+@Index(['userId'])
+@Index(['status'])
+@Index(['datetime'])
+@Index(['providerName'])
+@Index(['bookingCode'])
+@Index(['approvalCode'])
+@Index(['verificationCode'])
 export class Appointment {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ length: 100 })
+  @Column()
   serviceName: string;
 
-  @Column({ length: 100 })
+  @Column()
   providerName: string;
 
-  @Column({ type: 'timestamp' })
+  @Column()
   datetime: Date;
 
-  @Column({ nullable: true })
+  @Column()
   userId: number;
 
-  @Column({ length: 100 })
+  @Column()
   userEmail: string;
 
-  @Column({ length: 100 })
+  @Column()
   userName: string;
 
-  @Column({ nullable: true })
-  age: number;
-
-  @Column({ length: 10, nullable: true })
-  gender: string;
-
-  @Column({ length: 100, nullable: true })
-  company: string;
-
-  @Column({ type: 'varchar', length: 20, default: 'Normal' })
-  priority: string;
-
-  @Column({ default: true })
-  forSelf: boolean;
-
-  @Column({ length: 100, nullable: true })
-  patientName: string;
-
-  @Column({ type: 'text', nullable: true })
+  @Column({ nullable: true, type: 'text' })
   notes: string;
 
-  @Column({ type: 'text', nullable: true })
-  comment: string;
+  @Column({ type: 'enum', enum: BookingStatus, default: BookingStatus.PENDING })
+  status: BookingStatus;
 
-  @Column({ type: 'varchar', length: 20, default: 'Pending' })
-  status: string;
+  @Column({ type: 'enum', enum: BookingPriority, default: BookingPriority.NORMAL })
+  priority: BookingPriority;
+
+  @Column({ default: 60 })
+  duration: number;
+
+  @Column({ nullable: true })
+  endTime: Date;
+
+  @Column({ nullable: true, unique: true })
+  bookingCode: string;
+
+  @Column({ nullable: true, unique: true })
+  approvalCode: string;
+
+  @Column({ nullable: true, unique: true })
+  verificationCode: string;
+
+  @Column({ nullable: true, type: 'text' })
+  qrCodeData: string;
+
+  @Column({ default: false })
+  isExpired: boolean;
+
+  @Column({ nullable: true })
+  expiredAt: Date;
 
   @Column({ default: false })
   isArchived: boolean;
 
   @Column({ nullable: true })
-  calendarEventId: string;
+  archivedAt: Date;
 
   @Column({ nullable: true })
-  calendarEventLink: string;
+  checkedInAt: Date;
 
   @Column({ nullable: true })
-  meetLink: string;
+  completedAt: Date;
+
+  @Column({ nullable: true })
+  cancelledAt: Date;
+
+  @Column({ nullable: true, type: 'text' })
+  cancellationReason: string;
 
   @Column({ default: false })
-  calendarSynced: boolean;
+  reminderSent: boolean;
+
+  @Column({ default: false })
+  feedbackGiven: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  feedbackRating: number;
+
+  @Column({ nullable: true, type: 'text' })
+  feedbackComment: string;
+
+  @Column({ nullable: true })
+  feedbackDate: Date;
+
+  @Column({ nullable: true })
+  googleCalendarEventId: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata: Record<string, any>;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -72,7 +127,7 @@ export class Appointment {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @ManyToOne(() => User, user => user.appointments)
+  @ManyToOne(() => User, (user) => user.appointments)
   @JoinColumn({ name: 'userId' })
   user: User;
 }

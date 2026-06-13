@@ -1,125 +1,111 @@
-﻿import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  UseGuards,
-  Request,
-  Query,
-  BadRequestException,
-  ForbiddenException,
-  Res,
-} from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+﻿import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Ip, ParseIntPipe } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
-import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
-import { ExportOptionsDto } from './dto/export-options.dto';
-import { QueryAppointmentDto } from './dto/query-appointment.dto';
-import { Response } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 
 @Controller('appointments')
 @UseGuards(JwtAuthGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(private readonly appointmentsService: AppointmentsService) {}
 
   @Post()
-  async create(@Body() body: CreateAppointmentDto, @Request() req) {
-    return this.service.create({
-      ...body,
-      userId: req.user.userId,
-      userEmail: req.user.email,
-      userName: req.user.name,
-      datetime: new Date(body.datetime),
-    });
+  async create(@Request() req: AuthenticatedRequest, @Body() body: any, @Ip() ip: string) {
+    const data = await this.appointmentsService.create(body, req.user.userId || req.user.id);
+    return { success: true, data };
   }
 
   @Get()
-  async findAll(@Request() req, @Query() query: QueryAppointmentDto) {
-    if (req.user.role === 'admin') {
-      return this.service.findAll(query);
-    } else if (req.user.role === 'staff') {
-      return this.service.findByProvider(req.user.name, query);
-    } else {
-      return this.service.findByUser(req.user.email, query);
-    }
+  async findAll(@Query() query: any) {
+    return this.appointmentsService.findAll(query);
   }
 
   @Get('my')
-  async findMy(@Request() req, @Query() query: QueryAppointmentDto) {
-    return this.service.findByUser(req.user.email, query);
+  async findMy(@Request() req: AuthenticatedRequest, @Query() query: any) {
+    const appointments = await this.appointmentsService.findByUserId(req.user.userId || req.user.id);
+    return { success: true, data: appointments };
+  }
+
+  @Get('upcoming')
+  async findUpcoming(@Request() req: AuthenticatedRequest) {
+    const appointments = await this.appointmentsService.findByUserId(req.user.userId || req.user.id);
+    const upcoming = appointments.filter(a => new Date(a.datetime) > new Date() && a.status === 'approved');
+    return { success: true, data: upcoming };
   }
 
   @Get('stats')
-  async getStats(@Request() req) {
-    if (req.user.role === 'admin') {
-      return this.service.getStats();
-    } else if (req.user.role === 'staff') {
-      return this.service.getStats(undefined, req.user.name);
-    } else {
-      return this.service.getStats(req.user.email);
-    }
+  async getStats() {
+    return this.appointmentsService.getStats();
   }
 
-  @Post('export')
-  async export(
-    @Body() options: ExportOptionsDto,
-    @Request() req,
-    @Res() res: Response,
-  ) {
-    if (req.user.role !== 'admin') {
-      throw new ForbiddenException('Only admins can export appointments');
-    }
+  @Get('user-stats')
+  async getUserStats(@Request() req: AuthenticatedRequest) {
+    const stats = await this.appointmentsService.getUserBookingStats(req.user.userId || req.user.id);
+    return { success: true, data: stats };
+  }
 
-    const file = await this.service.exportAppointments(options);
-    const filename = `appointments-export-${new Date().toISOString().split('T')[0]}.xlsx`;
-
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  @Get('my-limits')
+  async getMyLimits(@Request() req: AuthenticatedRequest) {
+    const limits = await this.appointmentsService.getUserBookingLimits(
+      req.user.userId || req.user.id, 
+      req.user.email
     );
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(file);
+    return { success: true, data: limits };
   }
 
-  @Get('availability')
-  async checkAvailability(@Query('providerName') providerName: string, @Query('date') date: string) {
-    if (!providerName || !date) return { bookedSlots: [] };
-    return this.service.checkAvailability(providerName, date);
+  @Post('available-slots')
+  async getAvailableSlots(@Body() body: any) {
+    const slots = await this.appointmentsService.getAvailableSlots(body.staffId, body.date, body.duration);
+    return { success: true, data: slots };
+  }
+
+  @Post('approve')
+  async approveByCode(@Body() body: any) {
+    const data = await this.appointmentsService.approveWithCode(body.approvalCode);
+    return { success: true, data };
+  }
+
+  @Post('archive-expired')
+  async archiveExpired() {
+    const count = await this.appointmentsService.archiveExpiredAppointments();
+    return { success: true, data: { archivedCount: count } };
+  }
+
+  @Get('export')
+  async export(@Query() filters: any) {
+    return this.appointmentsService.export(filters);
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.service.findOne(parseInt(id));
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.appointmentsService.findOne(id);
+    return { success: true, data };
   }
 
-  @Patch(':id')
+  @Get(':id/files')
+  async getFiles(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.appointmentsService.getAppointmentFiles(id);
+    return { success: true, data };
+  }
+
+  @Put(':id/status')
   async updateStatus(
-    @Param('id') id: string,
-    @Body() body: UpdateAppointmentDto,
-    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: any,
+    @Request() req: AuthenticatedRequest
   ) {
-    if (!body.status) {
-      throw new BadRequestException('Status is required');
-    }
-
-    if (!['admin', 'staff'].includes(req.user.role)) {
-      throw new ForbiddenException('Only staff or admins can update appointments');
-    }
-
-    const appointment = await this.service.findOne(parseInt(id));
-    if (req.user.role === 'staff' && appointment.providerName !== req.user.name) {
-      throw new ForbiddenException('You can only manage your own appointments');
-    }
-
-    return this.service.updateStatus(parseInt(id), body.status, body.comment);
+    const data = await this.appointmentsService.updateStatus(id, body.status, body.comment, req.user.userId || req.user.id);
+    return { success: true, data };
   }
 
-  @Delete(':id')
-  async cancel(@Param('id') id: string, @Request() req) {
-    return this.service.cancel(parseInt(id), req.user.email, req.user.role);
+  @Delete(':id/cancel')
+  async cancel(@Param('id', ParseIntPipe) id: number, @Request() req: AuthenticatedRequest) {
+    const data = await this.appointmentsService.cancel(id, req.user.email, req.user.role);
+    return { success: true, data };
+  }
+
+  @Post(':id/feedback')
+  async addFeedback(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    const data = await this.appointmentsService.addFeedback(id, body.rating, body.comment);
+    return { success: true, data };
   }
 }

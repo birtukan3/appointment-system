@@ -1,9 +1,9 @@
 ﻿import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { User } from '../users/user.entity';
+import { User, UserRole, UserStatus } from '../users/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -13,69 +13,72 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async register(email: string, password: string, name: string, company?: string, phone?: string) {
-    const normalizedEmail = email.toLowerCase().trim();
-    
-    const existing = await this.userRepository.findOne({ where: { email: normalizedEmail } });
-    if (existing) {
-      throw new ConflictException('Email already exists');
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    
-    const user = this.userRepository.create({
-      name,
-      email: normalizedEmail,
-      password: hashedPassword,
-      role: 'user',
-      company: company || '',
-      phone: phone || '',
-      isActive: true,
-    });
-    
-    await this.userRepository.save(user);
-    
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
-  }
-
   async login(email: string, password: string) {
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
-    
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.email = :email', { email: email.toLowerCase().trim() })
+      .getOne();
+
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid credentials');
     }
-    
-    if (!user.isActive) {
-      throw new UnauthorizedException('Account is deactivated');
-    }
-    
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid credentials');
     }
-    
-    user.lastLogin = new Date();
-    await this.userRepository.save(user);
-    
-    const payload = { userId: user.id, email: user.email, role: user.role, name: user.name };
-    const token = this.jwtService.sign(payload);
-    
-    const { password: _, ...userWithoutPassword } = user;
-    
-    return { token, user: userWithoutPassword };
-  }
 
-  async forgotPassword(email: string) {
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException(`Account is ${user.status}`);
+    }
+
+    const payload = { sub: user.id, email: user.email, role: user.role };
+    const access_token = this.jwtService.sign(payload);
+
+    const { password: _, ...userWithoutPassword } = user;
 
     return {
       success: true,
-      message: user
-        ? 'Password recovery request received. Please contact an administrator to complete the reset.'
-        : 'If an account exists for that email, password recovery guidance will be provided.',
+      access_token,
+      ...userWithoutPassword,
+    };
+  }
+
+  async register(email: string, password: string, name: string) {
+    const existingUser = await this.userRepository.findOne({
+      where: { email: email.toLowerCase().trim() },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User already exists');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const user = this.userRepository.create({
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      name,
+      role: UserRole.USER,
+      status: UserStatus.ACTIVE,
+      isActive: true,
+      emailVerified: true,
+    });
+
+    await this.userRepository.save(user);
+
+    const payload = { sub: user.id, email: user.email, role: user.role };
+    const access_token = this.jwtService.sign(payload);
+
+    const { password: _, ...userWithoutPassword } = user;
+
+    return {
+      success: true,
+      message: 'Registration successful',
+      access_token,
+      ...userWithoutPassword,
     };
   }
 }

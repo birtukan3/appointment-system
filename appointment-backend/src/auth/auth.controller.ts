@@ -1,41 +1,30 @@
-﻿import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+﻿// src/auth/auth.controller.ts
+import { Controller, Post, Body, Get, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
-
-  @Post('register')
-  async register(@Body() body: RegisterDto) {
-    const user = await this.authService.register(
-      body.email,
-      body.password,
-      body.name,
-      body.company,
-      body.phone,
-    );
-
-    return { success: true, message: 'Registration successful', user };
-  }
+  constructor(private readonly authService: AuthService) {}
 
   @Post('login')
-  @HttpCode(HttpStatus.OK)
-  async login(@Body() body: LoginDto) {
-    const result = await this.authService.login(body.email, body.password);
-    return {
-      success: true,
-      message: 'Login successful',
-      token: result.token,
-      user: result.user,
-    };
+  async login(@Body() body: { email: string; password: string }) {
+    return this.authService.login(body.email, body.password);
   }
 
-  @Post('forgot-password')
-  @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body() body: ForgotPasswordDto) {
-    return this.authService.forgotPassword(body.email);
+  @Post('register')
+  async register(@Body() body: { email: string; password: string; name: string }) {
+    return this.authService.register(body.email, body.password, body.name);
+  }
+
+  @Post('logout')
+  async logout() {
+    return { success: true, message: 'Logged out successfully' };
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getMe(@Request() req) {
+    return { success: true, data: req.user };
   }
 }

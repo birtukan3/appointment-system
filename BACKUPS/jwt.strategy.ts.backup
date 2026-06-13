@@ -1,0 +1,30 @@
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { PassportStrategy } from '@nestjs/passport';
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(private config: ConfigService) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: config.get('JWT_SECRET', 'smartoffice-secret-key'),
+    });
+  }
+
+  async validate(payload: any) {
+    // Accept both `sub` (standard JWT subject) and `userId` (custom payload)
+    const userId = payload.userId || payload.sub || payload.id;
+    const email = payload.email || payload.username || null;
+    const name = payload.name || payload.fullName || null;
+    const role = payload.role || payload.userRole || 'user';
+
+    return {
+      userId,
+      email,
+      name,
+      role,
+    };
+  }
+}
