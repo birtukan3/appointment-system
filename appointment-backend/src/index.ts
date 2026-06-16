@@ -1,7 +1,45 @@
-﻿import express from 'express';
+﻿import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+
+// Extend Express Request to include our user type
+declare global {
+  namespace Express {
+    interface User {
+      id: number;
+      email: string;
+      role: string;
+    }
+  }
+}
+
+interface MockUser {
+  id: number;
+  email: string;
+  password: string;
+  name: string;
+  role: string;
+  isActive: boolean;
+  emailVerified: boolean;
+  createdAt: string;
+  department?: string;
+}
+
+interface MockAppointment {
+  id: number;
+  serviceName: string;
+  providerName: string;
+  datetime: string;
+  userId: number;
+  userEmail: string;
+  userName: string;
+  status: string;
+  priority: string;
+  duration: number;
+  notes: string;
+  createdAt: string;
+}
 
 const app = express();
 const PORT = 3002;
@@ -11,7 +49,7 @@ app.use(cors());
 app.use(express.json());
 
 // In-memory database (mock data)
-let users = [
+let users: MockUser[] = [
   {
     id: 1,
     email: 'admin@example.com',
@@ -45,7 +83,7 @@ let users = [
   }
 ];
 
-let appointments = [
+let appointments: MockAppointment[] = [
   {
     id: 1,
     serviceName: 'Cardiology Consultation',
@@ -66,7 +104,7 @@ let nextUserId = 4;
 let nextAppointmentId = 2;
 
 // Helper function to generate token
-function generateToken(user) {
+function generateToken(user: MockUser) {
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role },
     JWT_SECRET,
@@ -75,7 +113,7 @@ function generateToken(user) {
 }
 
 // Middleware to verify token
-function authMiddleware(req, res, next) {
+function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).json({ success: false, error: 'No token provided' });
@@ -83,7 +121,7 @@ function authMiddleware(req, res, next) {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; email: string; role: string };
     req.user = decoded;
     next();
   } catch (error) {
@@ -159,7 +197,7 @@ app.get('/api/auth/check-email', async (req, res) => {
 app.post('/api/auth/refresh', async (req, res) => {
   try {
     const { token } = req.body;
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
     const user = users.find(u => u.id === decoded.id);
     if (!user) {
       return res.status(401).json({ success: false, error: 'User not found' });

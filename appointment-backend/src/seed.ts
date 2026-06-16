@@ -1,5 +1,4 @@
-﻿@'
-const { DataSource } = require('typeorm');
+﻿const { DataSource } = require('typeorm');
 const bcrypt = require('bcryptjs');
 
 // Define enums
@@ -37,7 +36,18 @@ const BookingPriority = {
 
 // Define entities directly
 class User {
-  constructor(id, email, password, name, role, status, isActive, emailVerified, createdAt, updatedAt) {
+  id: number;
+  email: string;
+  password: string;
+  name: string;
+  role: string;
+  status: string;
+  isActive: boolean;
+  emailVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+
+  constructor(id: number, email: string, password: string, name: string, role: string, status: string, isActive: boolean, emailVerified: boolean, createdAt: Date, updatedAt: Date) {
     this.id = id;
     this.email = email;
     this.password = password;
@@ -52,7 +62,21 @@ class User {
 }
 
 class Appointment {
-  constructor(id, serviceName, providerName, datetime, userId, userEmail, userName, status, priority, notes, duration, createdAt, updatedAt) {
+  id: number;
+  serviceName: string;
+  providerName: string;
+  datetime: Date;
+  userId: number;
+  userEmail: string;
+  userName: string;
+  status: string;
+  priority: string;
+  notes: string;
+  duration: number;
+  createdAt: Date;
+  updatedAt: Date;
+
+  constructor(id: number, serviceName: string, providerName: string, datetime: Date, userId: number, userEmail: string, userName: string, status: string, priority: string, notes: string, duration: number, createdAt: Date, updatedAt: Date) {
     this.id = id;
     this.serviceName = serviceName;
     this.providerName = providerName;
@@ -277,6 +301,3 @@ async function seed() {
 }
 
 seed();
-'@ | Out-File -FilePath seed.js -Encoding UTF8
-
-Write-Host "✓ Created seed.js" -ForegroundColor Green

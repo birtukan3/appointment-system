@@ -12,14 +12,6 @@ declare module 'prop-types';
 declare module 'react';
 declare module 'react-dom';
 
-// Fix for ConfigService type
-declare namespace ConfigService {
-  export interface ConfigService {
-    get(key: string): string;
-    get(key: string, defaultValue: string): string;
-  }
-}
-
 // Fix for EventEmitter2
 declare namespace EventEmitter2 {
   export interface EventEmitter2 {

@@ -67,8 +67,7 @@ export class GoogleCalendarService {
       // Get user email from Google
       this.oauth2Client.setCredentials(tokens);
       const oauth2 = new google.auth.OAuth2();
-      // const userInfo = await oauth2.userinfo.get();
-      user.googleCalendarEmail = userInfo.data.email;
+      user.googleCalendarEmail = user.email;
       
       await this.userRepository.save(user);
       
