@@ -1,4 +1,5 @@
-﻿import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request, ForbiddenException, Query } from '@nestjs/common';
+﻿// backend/src/users/users.controller.ts
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request, ForbiddenException, Query } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -22,18 +23,24 @@ export class UsersController {
   }
 
   @Get('staff')
+  @Roles('admin')
+  @UseGuards(RolesGuard)
   async getStaff() {
     const staff = await this.usersService.getStaff();
     return { success: true, data: staff };
   }
 
   @Get('staff/details')
+  @Roles('admin')
+  @UseGuards(RolesGuard)
   async getStaffWithDetails() {
     const staff = await this.usersService.getStaffWithDetails();
     return { success: true, data: staff };
   }
 
   @Get('staff/search')
+  @Roles('admin')
+  @UseGuards(RolesGuard)
   async searchStaff(@Query('q') query: string, @Query('limit') limit: string = '10') {
     const staff = await this.usersService.getStaff();
     if (!query) {
@@ -48,6 +55,8 @@ export class UsersController {
   }
 
   @Get('staff/:id')
+  @Roles('admin')
+  @UseGuards(RolesGuard)
   async getStaffById(@Param('id') id: string) {
     const staff = await this.usersService.findById(parseInt(id, 10));
     return { success: true, data: staff };
@@ -97,6 +106,21 @@ export class UsersController {
   async reactivateAccount(@Request() req) {
     await this.usersService.reactivateAccount(req.user.userId);
     return { success: true, message: 'Account reactivated successfully' };
+  }
+
+  @Get('experts')
+  @Roles('admin')
+  @UseGuards(RolesGuard)
+  async getExperts() {
+    const staff = await this.usersService.getStaff();
+    return staff.map(s => ({
+      id: s.id,
+      name: s.name,
+      position: s.specialization || s.department || 'Tech Expert',
+      department: s.department || 'Engineering',
+      rating: 4.8,
+      techStack: s.specialization || 'JavaScript, React'
+    }));
   }
 
   @Get('security/status')

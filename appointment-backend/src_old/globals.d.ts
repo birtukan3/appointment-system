@@ -1,1 +1,0 @@
-declare module '@nestjs/common'; declare module '@nestjs/core'; declare module '@nestjs/websockets'; declare module '@nestjs/jwt'; declare module '@nestjs/config';

@@ -1,4 +1,5 @@
-﻿import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, BeforeInsert, BeforeUpdate, Index } from 'typeorm';
+﻿// backend/src/users/user.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, BeforeInsert, BeforeUpdate, Index } from 'typeorm';
 import { Appointment } from '../appointments/appointment.entity';
 
 export enum UserRole {
@@ -18,8 +19,6 @@ export enum UserStatus {
 @Entity('users')
 @Index(['email'])
 @Index(['role', 'isActive'])
-@Index(['googleCalendarConnected'])
-@Index(['createdAt'])
 export class User {
   @PrimaryGeneratedColumn()
   id: number;
@@ -42,12 +41,13 @@ export class User {
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
-  @Column({ type: 'enum', enum: UserStatus, default: UserStatus.PENDING_VERIFICATION })
+  @Column({ type: 'enum', enum: UserStatus, default: UserStatus.ACTIVE })
   status: UserStatus;
 
   @Column({ nullable: true })
   company: string;
 
+  // ✅ ALL FIELDS EXIST
   @Column({ nullable: true })
   phone: string;
 
@@ -63,6 +63,9 @@ export class User {
   @Column({ nullable: true, type: 'text' })
   bio: string;
 
+  @Column({ type: 'text', array: true, nullable: true })
+  qualifications: string[];
+
   @Column({ nullable: true })
   avatar: string;
 
@@ -71,15 +74,9 @@ export class User {
 
   @Column({ default: false })
   isDeactivated: boolean;
-
+  
   @Column({ default: false })
   isBlocked: boolean;
-
-  @Column({ default: false })
-  isDeleted: boolean;
-
-  @Column({ type: 'timestamp', nullable: true })
-  deletedAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
   deactivatedAt: Date;
@@ -155,7 +152,7 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   lastPasswordChangeIp: string;
 
-  @Column({ type: 'jsonb', nullable: true, default: [] })
+  @Column({ type: 'jsonb', nullable: true, default: {} })
   loginHistory: Array<{
     timestamp: Date;
     ip: string;
@@ -209,7 +206,7 @@ export class User {
   }
 
   get canSyncCalendar(): boolean {
-    return this.googleCalendarConnected &&
+    return this.googleCalendarConnected && 
            this.status === UserStatus.ACTIVE &&
            this.isActive &&
            !this.isBlocked;
@@ -218,6 +215,7 @@ export class User {
   incrementFailedLoginAttempts(): void {
     this.failedLoginAttempts++;
     this.lastFailedLoginAt = new Date();
+    
     if (this.failedLoginAttempts >= 5) {
       this.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
     }
@@ -225,16 +223,28 @@ export class User {
 
   resetFailedLoginAttempts(): void {
     this.failedLoginAttempts = 0;
-    this.lastFailedLoginAt = null as any;
-    this.lockUntil = null as any;
+    this.lastFailedLoginAt = null;
+    this.lockUntil = null;
   }
 
   recordLogin(ip: string, userAgent?: string): void {
     this.lastLoginAt = new Date();
     this.lastLoginIp = ip;
-    if (!this.loginHistory) this.loginHistory = [];
-    this.loginHistory.unshift({ timestamp: new Date(), ip, userAgent, success: true });
-    if (this.loginHistory.length > 50) this.loginHistory = this.loginHistory.slice(0, 50);
+    
+    if (!this.loginHistory) {
+      this.loginHistory = [];
+    }
+    
+    this.loginHistory.unshift({
+      timestamp: new Date(),
+      ip,
+      userAgent,
+      success: true,
+    });
+    
+    if (this.loginHistory.length > 50) {
+      this.loginHistory = this.loginHistory.slice(0, 50);
+    }
   }
 
   updateGoogleCalendarSync(): void {
@@ -245,21 +255,9 @@ export class User {
   disconnectGoogleCalendar(): void {
     this.googleCalendarTokens = null;
     this.googleCalendarConnected = false;
-    this.googleCalendarEmail = null as any;
-    this.googleCalendarLastSyncAt = null as any;
+    this.googleCalendarEmail = null;
+    this.googleCalendarLastSyncAt = null;
     this.googleCalendarSyncCount = 0;
-  }
-
-  softDelete(): void {
-    this.isDeleted = true;
-    this.deletedAt = new Date();
-    this.isActive = false;
-  }
-
-  restore(): void {
-    this.isDeleted = false;
-    this.deletedAt = null as any;
-    this.isActive = true;
   }
 
   @BeforeInsert()
@@ -281,7 +279,7 @@ export class User {
   updateStatusBasedOnFlags() {
     if (this.isBlocked) {
       this.status = UserStatus.BLOCKED;
-    } else if (!this.isActive || this.isDeactivated || this.isDeleted) {
+    } else if (!this.isActive || this.isDeactivated) {
       this.status = UserStatus.INACTIVE;
     } else if (!this.emailVerified) {
       this.status = UserStatus.PENDING_VERIFICATION;

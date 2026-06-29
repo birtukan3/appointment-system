@@ -1,30 +1,30 @@
 ﻿import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { User } from '../users/user.entity';
 
-@Entity('uploads')
+@Entity('uploads')  // Table name in database
 export class Upload {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ type: 'varchar', length: 255 })
   filename: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 255 })
   originalName: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 100 })
   mimeType: string;
 
-  @Column()
+  @Column({ type: 'int' })
   size: number;
 
-  @Column()
+  @Column({ type: 'varchar', length: 500 })
   filePath: string;
 
-  @Column()
+  @Column({ type: 'int' })
   userId: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'int', nullable: true })
   appointmentId: number;
 
   @CreateDateColumn()

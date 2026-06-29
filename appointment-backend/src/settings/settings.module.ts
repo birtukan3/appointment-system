@@ -10,5 +10,6 @@ import { AuditModule } from '../audit/audit.module';
     AuditModule,
   ],
   controllers: [SettingsController],
+  exports: [TypeOrmModule],
 })
 export class SettingsModule {}

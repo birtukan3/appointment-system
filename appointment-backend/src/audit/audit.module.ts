@@ -1,4 +1,5 @@
-﻿import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
+﻿// src/audit/audit.module.ts
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLog } from './audit.entity';
 import { AuditMiddleware } from './audit.middleware';

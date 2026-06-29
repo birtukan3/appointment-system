@@ -1,4 +1,4 @@
-﻿import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Ip, ParseIntPipe } from '@nestjs/common';
+﻿import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Ip, ParseIntPipe, Logger, BadRequestException } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
@@ -6,12 +6,63 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 @Controller('appointments')
 @UseGuards(JwtAuthGuard)
 export class AppointmentsController {
-  constructor(private readonly appointmentsService: AppointmentsService) {}
+  private readonly logger = new Logger(AppointmentsController.name);
 
+  constructor(private readonly appointmentsService: AppointmentsService) {}
+// Add this after the other endpoints
+
+@Get(':id/activities')
+async getActivities(
+  @Param('id', ParseIntPipe) id: number,
+  @Request() req: any
+): Promise<{ success: boolean; data: any[] }> {
+  try {
+    const userId = req.user?.userId || req.user?.id;
+    // Verify the appointment belongs to this user
+    const appointment = await this.appointmentsService.findOne(id);
+    
+    if (appointment.userId !== userId && req.user?.role !== 'admin') {
+      return { success: false, data: [] };
+    }
+    
+    // Return mock activities or fetch from audit logs
+    // For now, return empty array
+    return { success: true, data: [] };
+  } catch (error) {
+    this.logger.error(`Failed to get activities for appointment ${id}: ${error.message}`);
+    return { success: false, data: [] };
+  }
+}
   @Post()
   async create(@Request() req: AuthenticatedRequest, @Body() body: any, @Ip() ip: string) {
-    const data = await this.appointmentsService.create(body, req.user.userId || req.user.id);
-    return { success: true, data };
+    try {
+      const userId = req.user.userId || req.user.id;
+      const user = req.user as any;
+
+      // ✅ ENSURE ALL REQUIRED FIELDS WITH FALLBACKS
+      const enrichedData = {
+        ...body,
+        userId: userId,
+        userEmail: body.userEmail || body.clientEmail || user?.email || 'user@example.com',
+        userName: body.userName || body.clientName || user?.name || user?.fullName || 'User',
+        serviceName: body.serviceName || 'Consultation',
+        providerName: body.providerName || body.expertName || 'Staff',
+        duration: body.duration || 60,
+        priority: body.priority || 'normal',
+        notes: body.notes || '',
+      };
+
+      this.logger.log(`📝 Creating appointment for user: ${userId}, name: ${enrichedData.userName}`);
+
+      const data = await this.appointmentsService.create(enrichedData, userId);
+      return { success: true, data };
+    } catch (error) {
+      this.logger.error(`❌ Error creating appointment: ${error.message}`);
+      throw new BadRequestException({
+        success: false,
+        message: error.message || 'Failed to create appointment',
+      });
+    }
   }
 
   @Get()

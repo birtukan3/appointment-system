@@ -135,3 +135,13 @@ export const dismissAllToasts = () => {
   toast.dismiss();
   toastCache.clear();
 };
+
+export default {
+  success: showSuccess,
+  error: showError,
+  info: showInfo,
+  warning: showWarning,
+  loading: showLoading,
+  dismiss: dismissToast,
+  dismissAll: dismissAllToasts,
+};

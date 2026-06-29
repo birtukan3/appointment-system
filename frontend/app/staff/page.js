@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useContext, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { AppContext, getDefaultRouteForRole } from "../providers";
-import ProtectedRoute from "../components/ProtectedRoute";
+import { AppContext } from "../providers";
 import Navbar from "../components/Navbar";
 import api from "../lib/api";
 import {
@@ -27,7 +26,7 @@ import { format, formatDistance, subDays, subWeeks, subMonths,
   isToday, isTomorrow, isThisWeek, isThisMonth, parseISO, differenceInDays,
   startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 
-function StaffDashboardContent() {
+export default function StaffDashboard() {
   const router = useRouter();
   const { user, logout, isAuthenticated, loading: authLoading } = useContext(AppContext);
 
@@ -155,8 +154,8 @@ function StaffDashboardContent() {
   // ============ API CALLS ============
   const fetchStaffProfile = useCallback(async () => {
     try {
-      const response = await api.get("/users/profile");
-      setStaffProfile(response.data);
+      const response = await api.getProfile();
+      setStaffProfile(response);
     } catch (error) {
       console.error("Failed to fetch profile:", error);
     }
@@ -182,9 +181,14 @@ function StaffDashboardContent() {
         })
       };
       
-      const response = await api.get("/users/staff", { params });
-      const data = response.data || [];
-      const meta = response.meta || { total: 0, totalPages: 0 };
+      // ✅ Use the staff appointments endpoint
+      const response = await api.getStaffAppointments(params);
+      
+      const data = response?.data || response || [];
+      const meta = response?.pagination || { 
+        total: data.length, 
+        totalPages: Math.ceil(data.length / pagination.limit) 
+      };
       
       setAppointments(data);
       setPagination(prev => ({
@@ -193,18 +197,7 @@ function StaffDashboardContent() {
         totalPages: meta.totalPages || Math.ceil((meta.total || data.length) / prev.limit)
       }));
       
-      // Calculate stats from fetched data
       calculateStats(data);
-      
-      // Notify about new pending appointments
-      if (!silent && appointments.length > 0) {
-        const newPending = data.filter(a => 
-          a.status === "Pending" && !appointments.some(prev => prev.id === a.id)
-        );
-        newPending.forEach(app => {
-          addNotification("new", `New: ${app.serviceName} from ${app.userName || app.userEmail}`, app.id);
-        });
-      }
       
     } catch (error) {
       console.error("Fetch error:", error);
@@ -213,7 +206,7 @@ function StaffDashboardContent() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [pagination.page, pagination.limit, filters, customStartDate, customEndDate, appointments.length, addNotification]);
+  }, [pagination.page, pagination.limit, filters, customStartDate, customEndDate, refreshing]);
 
   const calculateStats = useCallback((data) => {
     const now = new Date();
@@ -227,7 +220,6 @@ function StaffDashboardContent() {
     const expired = data.filter(a => a.status === "Expired").length;
     const uniqueClients = new Set(data.map(a => a.userId)).size;
     
-    // Calculate average response time (for processed appointments)
     const processed = data.filter(a => a.status !== "Pending" && a.createdAt && a.updatedAt);
     const avgResponseTime = processed.length
       ? Math.round(processed.reduce((sum, a) => {
@@ -262,12 +254,9 @@ function StaffDashboardContent() {
     
     setActionLoading(true);
     try {
-      const payload = { status };
-      if (commentText) payload.comment = commentText;
-      
-      await api.patch(`/appointments/${id}`, payload);
+      // ✅ Use the staff-specific endpoint
+      await api.updateStaffAppointmentStatus(id, status, commentText);
       showUniqueToast(`Appointment ${status.toLowerCase()} successfully`, "success");
-      addNotification(status.toLowerCase(), `Appointment #${id.slice(-6)} was ${status.toLowerCase()}`, id);
       
       setComment("");
       setSelectedAppointment(null);
@@ -281,25 +270,7 @@ function StaffDashboardContent() {
     } finally {
       setActionLoading(false);
     }
-  }, [actionLoading, fetchAppointments, addNotification]);
-
-  const checkAndMarkExpired = useCallback(async () => {
-    const now = new Date();
-    const expiredApps = appointments.filter(app => 
-      app.status === "Approved" && new Date(app.datetime) < now
-    );
-    
-    for (const app of expiredApps) {
-      try {
-        await api.patch(`/appointments/${app.id}`, { status: "Expired" });
-        addNotification("expired", `Appointment #${app.id.slice(-6)} has expired`, app.id);
-      } catch (err) {
-        console.error("Failed to mark expired:", err);
-      }
-    }
-    
-    if (expiredApps.length) await fetchAppointments(true);
-  }, [appointments, fetchAppointments, addNotification]);
+  }, [actionLoading, fetchAppointments]);
 
   // ============ EVENT HANDLERS ============
   const handleRefresh = useCallback(async () => {
@@ -369,8 +340,8 @@ function StaffDashboardContent() {
   const exportToCSV = useCallback(async () => {
     setExporting(true);
     try {
-      const response = await api.get("/users/staff/export", { params: filters });
-      const csvData = response.data;
+      // ✅ Use the staff-specific export endpoint
+      const csvData = await api.exportStaffAppointments(filters);
       
       const blob = new Blob(["\uFEFF" + csvData], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -452,42 +423,37 @@ function StaffDashboardContent() {
     { name: "Normal", value: stats.normal, color: "#3b82f6" }
   ], [stats]);
 
-  // ============ EFFECTS ============
-  useEffect(() => {
-    notificationsRef.current = notifications;
-  }, [notifications]);
-
+  // ============ AUTHENTICATION CHECK ============
   useEffect(() => {
     if (authLoading) return;
+
     if (!isAuthenticated || !user) {
-      router.replace("/login");
+      router.replace('/login');
       return;
     }
-    if (user.role !== "staff") {
-      router.replace(getDefaultRouteForRole(user.role));
-      return;
-    }
+
+    const userRole = user?.role?.toLowerCase();
     
+    if (userRole !== 'staff') {
+      const redirectPath = userRole === 'admin' ? '/admin' : '/dashboard';
+      router.replace(redirectPath);
+      return;
+    }
+
     if (!initializedRef.current) {
       initializedRef.current = true;
       fetchStaffProfile();
       fetchAppointments();
       
-      // Polling for real-time updates
       pollIntervalRef.current = setInterval(() => {
         fetchAppointments(true);
-        checkAndMarkExpired();
       }, 30000);
     }
     
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
-  }, [authLoading, isAuthenticated, user, router, fetchStaffProfile, fetchAppointments, checkAndMarkExpired]);
-
-  useEffect(() => {
-    fetchAppointments();
-  }, [fetchAppointments]);
+  }, [authLoading, isAuthenticated, user, router, fetchStaffProfile, fetchAppointments]);
 
   // ============ RENDER HELPERS ============
   const renderPriorityBadge = useCallback((priority) => {
@@ -513,8 +479,8 @@ function StaffDashboardContent() {
     );
   }, []);
 
- const renderStatCard = useCallback((title, value, IconComponent, color, onClick = null) => {
-    const Icon = icon;
+  const renderStatCard = useCallback((title, value, IconComponent, color, onClick = null) => {
+    const Icon = IconComponent;
     const colorClasses = {
       blue: "from-blue-500 to-blue-600",
       amber: "from-amber-500 to-amber-600",
@@ -558,6 +524,11 @@ function StaffDashboardContent() {
         </div>
       </>
     );
+  }
+
+  // If user is not staff, don't render the dashboard
+  if (!user || user.role?.toLowerCase() !== 'staff') {
+    return null;
   }
 
   return (
@@ -1593,14 +1564,5 @@ function StaffDashboardContent() {
         }
       `}</style>
     </>
-  );
-}
-
-// Main export with ProtectedRoute wrapper
-export default function StaffDashboard() {
-  return (
-    <ProtectedRoute allowedRoles={['staff']}>
-      <StaffDashboardContent />
-    </ProtectedRoute>
   );
 }

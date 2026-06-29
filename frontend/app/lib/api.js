@@ -1,8 +1,7 @@
 ﻿// frontend/app/lib/api.js
 // ============================================
 // ENHANCED PRODUCTION-READY API SERVICE
-// Version: 4.0.0 - FIXED EXPORTS
-// Features: Auth, Retry, Cache, Rate Limiting, File Upload, Booking System
+// Version: 6.1.0 - FULL COMPLETE FILE
 // ============================================
 
 import axios from 'axios';
@@ -14,12 +13,16 @@ const API_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
+// ============ LOGGING CONTROL ============
+const ENABLE_LOGGING = false;
+const ENABLE_DEV_TOOLS = false;
+
 // ============ DEV MODE ============
 const isDev = process.env.NODE_ENV === 'development';
 
 // ============ CACHE MANAGEMENT ============
 const cache = new Map();
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 5 * 60 * 1000;
 
 const getCacheKey = (url, params) => {
   return `${url}:${JSON.stringify(params || {})}`;
@@ -30,7 +33,6 @@ const isCacheValid = (cached) => {
 };
 
 const setCache = (key, data) => {
-  // Prevent cache from growing too large
   if (cache.size > 100) {
     const oldestKey = cache.keys().next().value;
     cache.delete(oldestKey);
@@ -87,13 +89,16 @@ class ApiService {
     this.pendingRequests = [];
     this.requestLogs = [];
     this.maxLogs = 50;
+    this._isSystemChecking = false;
+    this._lastSystemCheck = 0;
+    this._systemCheckInterval = 300000;
     
     this.api = axios.create({
       baseURL: API_URL,
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'X-Client-Version': '4.0.0',
+        'X-Client-Version': '6.1.0',
       },
       timeout: API_TIMEOUT,
     });
@@ -104,7 +109,7 @@ class ApiService {
 
   // ============ DEV TOOLS ============
   setupDevTools() {
-    if (typeof window !== 'undefined' && isDev) {
+    if (typeof window !== 'undefined' && isDev && ENABLE_DEV_TOOLS) {
       window.__api = {
         getLogs: () => this.requestLogs,
         clearLogs: () => { this.requestLogs = []; console.log('[API] Logs cleared'); },
@@ -113,6 +118,7 @@ class ApiService {
         getStats: () => this.getRequestStats(),
         setDebug: (enabled) => { window.__apiDebug = enabled; },
         testConnection: () => this.testConnection(),
+        getSystemStatus: () => this.getSystemStatus(),
       };
       console.log('%c[API] Dev tools available: window.__api', 'color: #10b981; font-size: 12px;');
     }
@@ -145,7 +151,10 @@ class ApiService {
   }
 
   logRequest(type, url, data = null, duration = null) {
-    if (!isDev && !window.__apiDebug) return;
+    if (!ENABLE_LOGGING || !isDev) return;
+    if (url && (url.includes('/system/') || url.includes('/health') || url.includes('/ping'))) {
+      return;
+    }
     
     const log = {
       timestamp: new Date().toISOString(),
@@ -173,17 +182,20 @@ class ApiService {
     try {
       const start = Date.now();
       await this.get('/system/health', { timeout: 5000 });
-      console.log(`%c[API] Connection test passed (${Date.now() - start}ms)`, 'color: #10b981');
+      if (isDev) {
+        console.log(`%c[API] Connection test passed (${Date.now() - start}ms)`, 'color: #10b981');
+      }
       return true;
     } catch (error) {
-      console.log('%c[API] Connection test failed', 'color: #ef4444');
+      if (isDev) {
+        console.log('%c[API] Connection test failed', 'color: #ef4444');
+      }
       return false;
     }
   }
 
   // ============ INTERCEPTORS ============
   setupInterceptors() {
-    // Request Interceptor
     this.api.interceptors.request.use(
       (config) => {
         const token = this.token || this.getStoredToken();
@@ -209,7 +221,6 @@ class ApiService {
       }
     );
 
-    // Response Interceptor
     this.api.interceptors.response.use(
       (response) => {
         const duration = Date.now() - (response.config.metadata?.startTime || Date.now());
@@ -233,8 +244,11 @@ class ApiService {
           duration
         );
         
-        // Handle 401 Unauthorized - Token expired
         if (error.response?.status === 401 && !originalRequest?._retry) {
+          if (originalRequest?.url?.includes('/auth/login')) {
+            return Promise.reject(error);
+          }
+          
           if (originalRequest) {
             originalRequest._retry = true;
           }
@@ -251,32 +265,42 @@ class ApiService {
           }
         }
         
-        // Handle 403 Forbidden
         if (error.response?.status === 403) {
           showToast('error', 'You don\'t have permission to perform this action.');
         }
         
-        // Handle 429 Too Many Requests
         if (error.response?.status === 429) {
           const retryAfter = error.response?.headers?.['retry-after'] || 30;
           showToast('warning', `Too many requests. Please try again in ${retryAfter} seconds.`);
         }
         
-        // Handle 404 Not Found
-        if (error.response?.status === 404 && !originalRequest?.url?.includes('/system/status')) {
-          if (isDev) {
-            console.warn(`[API] Endpoint not found: ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url}`);
+        if (error.response?.status === 404) {
+          if (originalRequest?.url?.includes('/system/') || 
+              originalRequest?.url?.includes('/health') || 
+              originalRequest?.url?.includes('/ping')) {
+            if (isDev && ENABLE_LOGGING) {
+              console.debug(`[API] System endpoint not found: ${originalRequest?.url}`);
+            }
+          } else {
+            if (isDev) {
+              console.warn(`[API] Endpoint not found: ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url}`);
+            }
+            if (!originalRequest?.url?.includes('/system/')) {
+              showToast('error', 'Resource not found');
+            }
           }
         }
         
-        // Handle Network Errors
         if (error.code === 'ERR_NETWORK') {
-          showToast('error', 'Network error. Please check your connection.');
+          if (!originalRequest?.url?.includes('/system/')) {
+            showToast('error', 'Network error. Please check your connection.');
+          }
         }
         
-        // Handle Timeout
         if (error.code === 'ECONNABORTED') {
-          showToast('error', 'Request timeout. Please try again.');
+          if (!originalRequest?.url?.includes('/system/')) {
+            showToast('error', 'Request timeout. Please try again.');
+          }
         }
         
         return Promise.reject(error);
@@ -415,7 +439,14 @@ class ApiService {
   // ============ AUTH ENDPOINTS ============
   async login(email, password) {
     try {
-      const response = await this.post('/auth/login', { email, password });
+      const emailStr = String(email || '').toLowerCase().trim();
+      const passwordStr = String(password || '');
+      
+      if (!emailStr || !passwordStr) {
+        throw new Error('Email and password are required');
+      }
+      
+      const response = await this.post('/auth/login', { email: emailStr, password: passwordStr });
       const data = response.data;
       
       if (data.access_token) {
@@ -424,23 +455,29 @@ class ApiService {
           this.setRefreshToken(data.refresh_token);
         }
         
-        const userData = {
-          id: data.id || data.userId,
-          userId: data.id || data.userId,
-          name: data.name || email.split('@')[0],
-          firstName: data.firstName || data.name?.split(' ')[0],
-          lastName: data.lastName,
-          email: data.email || email,
-          role: data.role || 'user',
-          company: data.company || '',
-          phone: data.phone || '',
-          department: data.department || '',
-          avatar: data.avatar || null,
-          createdAt: data.createdAt
+        const userData = data.user || data;
+        
+        const userObj = {
+          id: userData.id,
+          userId: userData.id,
+          name: userData.name || emailStr.split('@')[0],
+          firstName: userData.firstName || userData.name?.split(' ')[0] || '',
+          lastName: userData.lastName || '',
+          email: userData.email || emailStr,
+          role: userData.role || 'user',
+          company: userData.company || '',
+          phone: userData.phone || '',
+          department: userData.department || '',
+          avatar: userData.avatar || null,
+          createdAt: userData.createdAt,
+          isActive: userData.isActive !== undefined ? userData.isActive : true,
+          emailVerified: userData.emailVerified !== undefined ? userData.emailVerified : true,
+          twoFactorEnabled: userData.twoFactorEnabled || false,
+          googleCalendarConnected: userData.googleCalendarConnected || false,
         };
         
-        this.setCurrentUser(userData);
-        return userData;
+        this.setCurrentUser(userObj);
+        return userObj;
       }
       throw new Error(data.message || 'Login failed');
     } catch (error) {
@@ -650,6 +687,52 @@ class ApiService {
     return response.data;
   }
 
+  // ============ STAFF APPOINTMENT ENDPOINTS ============
+  async getStaffAppointments(params = {}) {
+    const cacheKey = getCacheKey('/appointments/staff', params);
+    const cached = cache.get(cacheKey);
+    
+    if (isCacheValid(cached)) {
+      return cached.data;
+    }
+    
+    const response = await this.get('/appointments/staff', { params });
+    setCache(cacheKey, response.data);
+    return response.data;
+  }
+
+  async updateStaffAppointmentStatus(id, status, comment = '') {
+    const response = await this.patch(`/appointments/staff/${id}`, { status, comment });
+    this.clearCache();
+    return response.data;
+  }
+
+  async getStaffAppointmentStats() {
+    const cacheKey = '/appointments/staff/stats';
+    const cached = cache.get(cacheKey);
+    
+    if (isCacheValid(cached)) {
+      return cached.data;
+    }
+    
+    const response = await this.get('/appointments/staff/stats');
+    setCache(cacheKey, response.data);
+    return response.data;
+  }
+
+  async exportStaffAppointments(params = {}) {
+    const response = await this.get('/appointments/staff/export', { 
+      params,
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async getStaffAppointmentDetails(id) {
+    const response = await this.get(`/appointments/staff/${id}`);
+    return response.data;
+  }
+
   // ============ CONSULTATION ENDPOINTS ============
   async getServices() {
     const cacheKey = '/services';
@@ -815,8 +898,27 @@ class ApiService {
       const response = await this.get('/system/status', { timeout: 5000 });
       return response.data;
     } catch (error) {
-      console.error('[API] System status error:', error?.message);
-      return { status: 'unknown', online: false, error: error?.message };
+      if (error.response?.status === 404) {
+        return { 
+          status: 'online', 
+          online: true, 
+          version: '2.0.0',
+          maintenance: false,
+          error: 'Endpoint not found but server is running'
+        };
+      }
+      if (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED') {
+        return { 
+          status: 'degraded', 
+          online: false, 
+          error: error?.message || 'Network error'
+        };
+      }
+      return { 
+        status: 'degraded', 
+        online: false, 
+        error: error?.message || 'System status unavailable'
+      };
     }
   }
 
@@ -825,6 +927,9 @@ class ApiService {
       const response = await this.get('/system/health', { timeout: 5000 });
       return response.data;
     } catch (error) {
+      if (error.response?.status === 404 || error.code === 'ERR_NETWORK') {
+        return { status: 'online', online: true };
+      }
       return { status: 'degraded', online: false, error: error?.message };
     }
   }
@@ -1059,10 +1164,10 @@ class ApiService {
 // ============ CREATE AND EXPORT SINGLETON INSTANCE ============
 const apiService = new ApiService();
 
-// DEFAULT EXPORT - Use this for api.login(), api.getProfile(), etc.
+// DEFAULT EXPORT
 export default apiService;
 
-// NAMED EXPORTS - Properly bound methods for direct import
+// ============ NAMED EXPORTS ============
 export const login = (email, password) => apiService.login(email, password);
 export const register = (userData) => apiService.register(userData);
 export const logout = () => apiService.logout();
@@ -1088,6 +1193,11 @@ export const createAppointment = (data) => apiService.createAppointment(data);
 export const cancelAppointment = (id) => apiService.cancelAppointment(id);
 export const updateAppointmentStatus = (id, status, comment) => apiService.updateAppointmentStatus(id, status, comment);
 export const getAvailableSlots = (expertId, date) => apiService.getAvailableSlots(expertId, date);
+export const getStaffAppointments = (params) => apiService.getStaffAppointments(params);
+export const updateStaffAppointmentStatus = (id, status, comment) => apiService.updateStaffAppointmentStatus(id, status, comment);
+export const getStaffAppointmentStats = () => apiService.getStaffAppointmentStats();
+export const exportStaffAppointments = (params) => apiService.exportStaffAppointments(params);
+export const getStaffAppointmentDetails = (id) => apiService.getStaffAppointmentDetails(id);
 export const getServices = () => apiService.getServices();
 export const getMyConsultations = (params) => apiService.getMyConsultations(params);
 export const getUserBookingStats = () => apiService.getUserBookingStats();

@@ -127,7 +127,6 @@ const FullCalendar = ({ selectedDate, onDateSelect, bookedDates = [] }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [calendarDays, setCalendarDays] = useState([]);
 
-  // Generate calendar days whenever month changes
   useEffect(() => {
     const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 0 });
     const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 0 });
@@ -568,18 +567,59 @@ export default function BookConsultationPage() {
   };
 
   const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) { toast.error("Please select a file"); return; }
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'application/pdf', 'text/plain'];
-    if (!allowedTypes.includes(file.type)) { toast.error("Only images, PDF, and text files are allowed"); return; }
-    if (file.size > 10 * 1024 * 1024) { toast.error("File size must be less than 10MB"); return; }
-    setUploading(true);
-    try {
-      const uploadedFile = await api.uploadFile(file);
-      if (uploadedFile) { setUploadedFiles(prev => [...prev, uploadedFile]); toast.success(`${file.name} uploaded successfully!`); event.target.value = ''; }
-    } catch (error) { console.error("Upload error:", error); toast.error("Upload failed. Please try again."); }
-    finally { setUploading(false); }
-  };
+  const file = event.target.files[0];
+  if (!file) { 
+    toast.error("Please select a file"); 
+    return; 
+  }
+  
+  // ✅ Validate file type
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'application/pdf', 'text/plain'];
+  const fileType = file.type || file.name?.split('.').pop()?.toLowerCase();
+  
+  // Check by MIME type or extension
+  const isValidType = allowedTypes.includes(file.type) || 
+                      ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'txt'].includes(fileType);
+  
+  if (!isValidType) { 
+    toast.error("Only images, PDF, and text files are allowed"); 
+    return; 
+  }
+  
+  // ✅ Validate file size
+  if (file.size > 10 * 1024 * 1024) { 
+    toast.error("File size must be less than 10MB"); 
+    return; 
+  }
+  
+  setUploading(true);
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // ✅ Use the correct API endpoint
+    const response = await api.post('/uploads', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    if (response.data?.success) {
+      const uploadedFile = response.data.data;
+      setUploadedFiles(prev => [...prev, uploadedFile]);
+      toast.success(`${file.name} uploaded successfully!`);
+      event.target.value = '';
+    } else {
+      toast.error(response.data?.message || 'Upload failed');
+    }
+  } catch (error) {
+    console.error("Upload error:", error);
+    const errorMsg = error.response?.data?.message || error.message || "Upload failed. Please try again.";
+    toast.error(errorMsg);
+  } finally {
+    setUploading(false);
+  }
+};
 
   const removeFile = (fileId) => { setUploadedFiles(prev => prev.filter(f => f.id !== fileId)); toast.success("File removed"); };
 
@@ -626,20 +666,35 @@ export default function BookConsultationPage() {
   const handleNext = () => { if (validateStep() && activeStep < steps.length) setActiveStep(activeStep + 1); };
   const handleBack = () => { if (activeStep > 1) setActiveStep(activeStep - 1); };
 
+  // ============================================
+  // ✅ FIXED: HANDLE SUBMIT - Added userName & userEmail
+  // ============================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateStep()) return;
-    if (cooldown > 0) { toast.error(`Please wait ${cooldown} seconds before booking again`); return; }
-    if (bookingLocked) { toast.error(rateLimitError || "You cannot book at this time due to limits"); return; }
-    if (dailyBookingCount >= 5) { toast.error("You have reached the maximum of 5 consultations per day"); return; }
+    if (cooldown > 0) {
+      toast.error(`Please wait ${cooldown} seconds before booking again`);
+      return;
+    }
+    if (bookingLocked) {
+      toast.error(rateLimitError || "You cannot book at this time due to limits");
+      return;
+    }
+    if (dailyBookingCount >= 5) {
+      toast.error("You have reached the maximum of 5 consultations per day");
+      return;
+    }
     
     setIsSubmitting(true);
     setLoading(true);
     try {
       const startDateTime = new Date(`${selectedDate}T${startTime}`);
       const endDateTime = new Date(`${selectedDate}T${endTime}`);
-      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) throw new Error("Invalid date/time selected");
+      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+        throw new Error("Invalid date/time selected");
+      }
       
+      // ✅ FIX: ALWAYS include userName and userEmail
       const consultationData = {
         expertId: selectedStaff.id,
         serviceName: selectedService,
@@ -648,12 +703,20 @@ export default function BookConsultationPage() {
         duration: calculatedDuration,
         notes: notes.trim() || undefined,
         priority: selectedPriority.toLowerCase(),
-        clientName: forSelf ? user?.name : clientName.trim(),
-        clientEmail: forSelf ? user?.email : clientEmail,
-        clientPhone: forSelf ? user?.phone : clientPhone,
+        
+        // ✅ CRITICAL FIX: These MUST be sent to the backend
+        userName: user?.name || user?.firstName || clientName || 'User',
+        userEmail: user?.email || clientEmail || 'user@example.com',
+        
+        // Client details
+        clientName: forSelf ? (user?.name || user?.firstName || 'User') : clientName.trim(),
+        clientEmail: forSelf ? (user?.email || 'user@example.com') : clientEmail,
+        clientPhone: forSelf ? (user?.phone || '') : clientPhone,
         fileIds: uploadedFiles.map(f => f.id),
         createCalendarEvent: true
       };
+
+      console.log('📤 Sending booking data:', consultationData);
       
       let response;
       try {
@@ -663,13 +726,18 @@ export default function BookConsultationPage() {
           console.warn("Backend endpoint /appointments not found – using mock booking");
           response = { data: { bookingCode: `MOCK-${Date.now()}`, calendarEventCreated: false } };
           toast.info("Demo mode: Booking recorded locally (backend missing)", { duration: 4000 });
-        } else throw error;
+        } else {
+          throw error;
+        }
       }
       
       const bookingReference = response.data?.bookingCode || response.data?.code || `BOOK-${Date.now()}`;
       setBookingCode(bookingReference);
-      if (response.data?.calendarEventCreated) toast.success("Consultation booked and added to your Google Calendar!");
-      else toast.success("Consultation booked successfully!");
+      if (response.data?.calendarEventCreated) {
+        toast.success("Consultation booked and added to your Google Calendar!");
+      } else {
+        toast.success("Consultation booked successfully!");
+      }
       
       setShowSuccess(true);
       setCooldown(30);
@@ -682,7 +750,10 @@ export default function BookConsultationPage() {
       console.error("Booking error:", error);
       const errorMsg = error.response?.data?.message || error.message || "Failed to book consultation";
       toast.error(errorMsg);
-      if (errorMsg.toLowerCase().includes("limit") || errorMsg.toLowerCase().includes("pending")) { setBookingLocked(true); setRateLimitError(errorMsg); }
+      if (errorMsg.toLowerCase().includes("limit") || errorMsg.toLowerCase().includes("pending")) {
+        setBookingLocked(true);
+        setRateLimitError(errorMsg);
+      }
       await fetchBookedSlots();
       await fetchUserBookingStats();
     } finally {

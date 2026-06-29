@@ -32,7 +32,7 @@ export enum AuditActionType {
   DELETE_FILE = 'DELETE_FILE',
   
   // System
-  UPDATE_SETTINGS = 'UPDATE_SETTINGS',
+  UPDATE_SETTINGS = 'UPDATE_SETTINGS',  // ✅ ADD THIS
   SEND_ANNOUNCEMENT = 'SEND_ANNOUNCEMENT',
   NOTIFICATION_SENT = 'NOTIFICATION_SENT',
   EXPORT_DATA = 'EXPORT_DATA',
@@ -85,8 +85,12 @@ export class AuditLog {
   @Column({ type: 'varchar', nullable: true })
   actionType: string | null;
 
+  // ✅ FIXED: Use 'metadata' instead of 'actionDetails' (or both)
   @Column({ type: 'json', nullable: true })
-  actionDetails: any;
+  actionDetails: any;  // ✅ Keep for backward compatibility
+
+  @Column({ type: 'json', nullable: true })
+  metadata: any;  // ✅ ADD THIS for new code
 
   @Column({ type: 'text' })
   description: string;

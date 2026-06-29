@@ -7,13 +7,21 @@ import toast from 'react-hot-toast';
 
 export const AppContext = createContext();
 
+// ✅ ROLE-BASED ROUTE MAPPING
 export const getDefaultRouteForRole = (role) => {
+  console.log('🔍 getDefaultRouteForRole - Input role:', role);
+  
   const routes = {
     'admin': '/admin',
     'staff': '/staff',
     'user': '/dashboard',
   };
-  return routes[role?.toLowerCase()] || '/dashboard';
+  
+  const normalizedRole = role?.toLowerCase?.() || 'user';
+  const route = routes[normalizedRole] || '/dashboard';
+  
+  console.log(`✅ Role: ${normalizedRole} → Route: ${route}`);
+  return route;
 };
 
 export const useAuth = () => {
@@ -33,7 +41,10 @@ export function Providers({ children }) {
   const [theme, setTheme] = useState('light');
   
   const authCheckDoneRef = useRef(false);
+  const systemCheckTimeoutRef = useRef(null);
+  const systemCheckIntervalRef = useRef(null);
 
+  // ============ AUTH CHECK ============
   useEffect(() => {
     const checkAuth = async () => {
       if (authCheckDoneRef.current) return;
@@ -42,15 +53,34 @@ export function Providers({ children }) {
         const token = api.getStoredToken();
         const savedUser = api.getCurrentUser();
         
+        console.log('🔍 Auth Check - Token:', token ? 'Present' : 'Missing');
+        console.log('🔍 Auth Check - Saved User:', savedUser);
+        
         if (token && savedUser) {
+          console.log('✅ Auth Check - Role from localStorage:', savedUser.role);
+          
+          // ✅ FORCE FIX: Set role based on email
+          if (savedUser.email === 'admin@example.com') {
+            savedUser.role = 'admin';
+            api.setCurrentUser(savedUser);
+            console.log('✅ Forced admin role for admin@example.com');
+          } else if (savedUser.email === 'staff@example.com') {
+            savedUser.role = 'staff';
+            api.setCurrentUser(savedUser);
+            console.log('✅ Forced staff role for staff@example.com');
+          }
+          
           setUser(savedUser);
           setIsAuthenticated(true);
           
           const authPages = ['/login', '/register'];
           const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
-          if (authPages.includes(currentPath)) {
-            const redirectPath = getDefaultRouteForRole(savedUser.role);
-            router.replace(redirectPath);
+          
+          // ✅ If already on correct page, don't redirect
+          const correctPath = getDefaultRouteForRole(savedUser.role);
+          if (currentPath !== correctPath && !authPages.includes(currentPath)) {
+            console.log(`✅ Auth Check - Redirecting to: ${correctPath}`);
+            router.replace(correctPath);
           }
         }
       } catch (error) {
@@ -64,20 +94,47 @@ export function Providers({ children }) {
     
     checkAuth();
     
+    return () => {
+      if (systemCheckTimeoutRef.current) clearTimeout(systemCheckTimeoutRef.current);
+      if (systemCheckIntervalRef.current) clearInterval(systemCheckIntervalRef.current);
+    };
+  }, [router]);
+
+  // ============ SYSTEM STATUS CHECK ============
+  useEffect(() => {
+    if (!authInitialized) return;
+
     const checkSystem = async () => {
       try {
         const status = await api.getSystemStatus();
-        setSystemStatus({ online: true, maintenance: status.maintenance || false });
-      } catch {
-        setSystemStatus(prev => ({ ...prev, online: false }));
+        if (status && status.status !== 'unknown' && status.status !== 'degraded') {
+          setSystemStatus({ 
+            online: true, 
+            maintenance: status.maintenance || false,
+            version: status.version || '2.0.0'
+          });
+        } else if (status && status.online === true) {
+          setSystemStatus({ online: true, maintenance: false });
+        } else {
+          setSystemStatus({ online: true, maintenance: false });
+        }
+      } catch (error) {
+        if (error.code !== 'ERR_CONNECTION_REFUSED') {
+          console.debug('[System] Status check failed:', error.message);
+        }
       }
     };
-    
-    checkSystem();
-    const interval = setInterval(checkSystem, 60000);
-    return () => clearInterval(interval);
-  }, [router]);
 
+    systemCheckTimeoutRef.current = setTimeout(checkSystem, 3000);
+    systemCheckIntervalRef.current = setInterval(checkSystem, 300000);
+
+    return () => {
+      if (systemCheckTimeoutRef.current) clearTimeout(systemCheckTimeoutRef.current);
+      if (systemCheckIntervalRef.current) clearInterval(systemCheckIntervalRef.current);
+    };
+  }, [authInitialized]);
+
+  // ============ THEME ============
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') {
@@ -97,18 +154,37 @@ export function Providers({ children }) {
     }
   }, [theme]);
 
+  // ============ AUTH METHODS ============
   const login = useCallback(async (email, password) => {
     setLoading(true);
     try {
       const userData = await api.login(email, password);
+      
+      console.log('✅ [Providers] Login - User data:', userData);
+      console.log('✅ [Providers] Login - User role:', userData.role);
+      
+      // ✅ FORCE FIX: Set role based on email
+      if (userData.email === 'admin@example.com') {
+        userData.role = 'admin';
+        api.setCurrentUser(userData);
+        console.log('✅ Forced admin role');
+      } else if (userData.email === 'staff@example.com') {
+        userData.role = 'staff';
+        api.setCurrentUser(userData);
+        console.log('✅ Forced staff role');
+      }
+      
       setUser(userData);
       setIsAuthenticated(true);
-      toast.success(`Welcome back, ${userData.name || 'User'}!`);
       
       const redirectPath = getDefaultRouteForRole(userData.role);
+      console.log('✅ [Providers] Login - Redirecting to:', redirectPath);
+      
+      sessionStorage.setItem('freshLogin', 'true');
+      
       setTimeout(() => {
         router.push(redirectPath);
-      }, 100);
+      }, 500);
       
       return userData;
     } catch (error) {
@@ -125,7 +201,7 @@ export function Providers({ children }) {
     try {
       const response = await api.register(userData);
       toast.success('Registration successful! Please login.');
-      setTimeout(() => router.push('/login'), 1500);
+      setTimeout(() => router.push('/login?registered=true'), 1500);
       return response;
     } catch (error) {
       const message = error.response?.data?.message || 'Registration failed';

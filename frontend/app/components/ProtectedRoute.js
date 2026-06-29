@@ -2,7 +2,7 @@
 
 import { useContext, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { AppContext } from '../providers';  // ✅ Fixed: Correct import path
+import { AppContext } from '../providers';
 
 export default function ProtectedRoute({ children, allowedRoles = ['user', 'admin', 'staff'] }) {
   const { isAuthenticated, user, loading } = useContext(AppContext);

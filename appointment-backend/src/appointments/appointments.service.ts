@@ -1,11 +1,13 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan, MoreThan, Not, IsNull } from 'typeorm';
+import { Repository, Between, LessThan, Not } from 'typeorm';
 import { Appointment, BookingStatus, BookingPriority } from './appointment.entity';
 import { User } from '../users/user.entity';
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     @InjectRepository(Appointment)
     public readonly repo: Repository<Appointment>,
@@ -14,19 +16,86 @@ export class AppointmentsService {
   ) {}
 
   async create(data: any, userId: number) {
-    const appointment = this.repo.create({
-      serviceName: data.serviceName,
-      providerName: data.providerName,
-      datetime: new Date(data.datetime),
-      userId: userId,
-      userEmail: data.userEmail,
-      userName: data.userName,
-      notes: data.notes || '',
-      status: BookingStatus.PENDING,
-      priority: data.priority || BookingPriority.NORMAL,
-      duration: data.duration || 60,
-    });
-    return await this.repo.save(appointment);
+    try {
+      this.logger.log(`📝 Creating appointment for user: ${userId}`);
+
+      // ✅ BUILD APPOINTMENT WITH ONLY EXISTING FIELDS
+      const appointment = new Appointment();
+      
+      // Required fields
+      appointment.serviceName = data.serviceName || 'Consultation';
+      appointment.providerName = data.providerName || data.expertName || 'Staff';
+      appointment.datetime = data.datetime ? new Date(data.datetime) : new Date();
+      appointment.userId = userId;
+      
+      // User info with fallbacks - CRITICAL FIX
+      appointment.userEmail = data.userEmail || data.clientEmail || 'user@example.com';
+      appointment.userName = data.userName || data.clientName || 'User';
+      
+      // Optional fields
+      appointment.notes = data.notes || '';
+      appointment.status = BookingStatus.PENDING;
+      appointment.priority = data.priority || BookingPriority.NORMAL;
+      appointment.duration = data.duration || 60;
+      
+      // Additional fields - only if they exist in entity
+      if (data.endTime) {
+        appointment.endTime = new Date(data.endTime);
+      }
+      
+      // Generate codes
+      appointment.bookingCode = data.bookingCode || this.generateBookingCode();
+      appointment.approvalCode = data.approvalCode || this.generateApprovalCode();
+      appointment.verificationCode = data.verificationCode || this.generateVerificationCode();
+      
+      // Default values
+      appointment.isExpired = false;
+      appointment.isArchived = false;
+      appointment.feedbackGiven = false;
+      appointment.reminderSent = false;
+      appointment.metadata = data.metadata || {};
+
+      this.logger.log(`✅ Creating appointment with: ${appointment.userName} (${appointment.userEmail})`);
+      this.logger.log(`📊 Appointment data:`, {
+        serviceName: appointment.serviceName,
+        providerName: appointment.providerName,
+        datetime: appointment.datetime,
+        userId: appointment.userId,
+        userEmail: appointment.userEmail,
+        userName: appointment.userName,
+        duration: appointment.duration,
+        priority: appointment.priority,
+        status: appointment.status
+      });
+
+      const saved = await this.repo.save(appointment);
+      this.logger.log(`✅ Appointment created with ID: ${saved.id}`);
+      return saved;
+    } catch (error) {
+      this.logger.error(`❌ Error creating appointment: ${error.message}`);
+      this.logger.error('Stack:', error.stack);
+      
+      if (error.code === '23502') {
+        throw new BadRequestException(`Missing required field: ${error.column}`);
+      }
+      if (error.code === '23505') {
+        throw new BadRequestException('Duplicate appointment detected');
+      }
+      
+      throw new BadRequestException(`Failed to create appointment: ${error.message}`);
+    }
+  }
+
+  private generateBookingCode(): string {
+    return `BK-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+  }
+
+  private generateApprovalCode(): string {
+    return `APP-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  }
+
+  private generateVerificationCode(): string {
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
   }
 
   async findAll(query: any = {}) {
@@ -72,6 +141,18 @@ export class AppointmentsService {
     const appointment = await this.findOne(id);
     appointment.status = status as BookingStatus;
     if (comment) appointment.notes = comment;
+    
+    if (status === BookingStatus.COMPLETED) {
+      appointment.completedAt = new Date();
+    }
+    if (status === BookingStatus.CANCELLED) {
+      appointment.cancelledAt = new Date();
+      appointment.cancellationReason = comment || '';
+    }
+    if (status === BookingStatus.CHECKED_IN) {
+      appointment.checkedInAt = new Date();
+    }
+    
     return await this.repo.save(appointment);
   }
 
@@ -128,15 +209,33 @@ export class AppointmentsService {
   }
 
   async getAvailableSlots(staffId: number, date: string, duration: number) {
-    // Simple implementation - returns time slots
     const slots = [];
     const startHour = 9;
     const endHour = 17;
     
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    
+    const existingBookings = await this.repo.find({
+      where: {
+        datetime: Between(startDate, endDate),
+        status: Not(BookingStatus.CANCELLED),
+      }
+    });
+    
+    const bookedTimes = existingBookings.map(b => 
+      new Date(b.datetime).getHours()
+    );
+    
     for (let hour = startHour; hour < endHour; hour++) {
+      const isBooked = bookedTimes.includes(hour);
       slots.push({
-        time: `${hour}:00`,
-        available: true,
+        time: `${hour.toString().padStart(2, '0')}:00`,
+        display: `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? 'PM' : 'AM'}`,
+        available: !isBooked,
+        bookedBy: isBooked ? 'existing' : null,
       });
     }
     
@@ -179,7 +278,7 @@ export class AppointmentsService {
   }
 
   async getAppointmentFiles(id: number) {
-    return []; // Return files for appointment
+    return [];
   }
 
   async export(filters: any) {

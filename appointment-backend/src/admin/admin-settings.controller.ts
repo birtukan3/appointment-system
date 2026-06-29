@@ -3,7 +3,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
-import { User, UserRole } from '../users/user.entity';  // ✅ Added UserRole
+import { User, UserRole } from '../users/user.entity';
 import { UserLimitOverride } from '../users/user-limit-override.entity';
 import { SystemSettings } from '../settings/settings.entity';
 import { AuditLog, AuditActionType, AuditStatus } from '../audit/audit.entity';
@@ -312,7 +312,6 @@ export class AdminSettingsController {
     
     const [totalUsers, totalStaff, totalAppointments, pendingAppointments, approvedAppointments] = await Promise.all([
       this.userRepo.count(),
-      // ✅ FIXED: Using UserRole.STAFF enum
       this.userRepo.count({ where: { role: UserRole.STAFF } }),
       this.appointmentRepo.count(),
       this.appointmentRepo.count({ where: { status: BookingStatus.PENDING } }),

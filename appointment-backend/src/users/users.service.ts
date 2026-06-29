@@ -1,8 +1,9 @@
-﻿import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
+﻿// backend/src/users/users.service.ts
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
-import { User, UserRole } from './user.entity';
-import * as bcrypt from 'bcryptjs';
+import { User, UserRole, UserStatus } from './user.entity';
+import * as bcrypt from 'bcryptjs';  // ✅ CHANGE: Use bcryptjs instead of bcrypt
 
 @Injectable()
 export class UsersService {
@@ -24,14 +25,34 @@ export class UsersService {
   async findByIdWithPassword(id: number): Promise<User | null> {
     return this.userRepo.findOne({ 
       where: { id },
-      select: ['id', 'email', 'name', 'password', 'role', 'isActive', 'failedLoginAttempts', 'lockUntil', 'twoFactorEnabled'] as any,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        password: true,
+        role: true,
+        isActive: true,
+        failedLoginAttempts: true,
+        lockUntil: true,
+        twoFactorEnabled: true,
+      },
     });
   }
 
   async getStaff(): Promise<User[]> {
     return this.userRepo.find({ 
-      where: { role: UserRole.STAFF, isActive: true, isDeactivated: false },
-      select: ['id', 'name', 'email', 'department', 'specialization', 'experience', 'phone', 'bio', 'createdAt', 'avatar'] as any,
+      where: { role: UserRole.STAFF, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        department: true,
+        specialization: true,
+        experience: true,
+        phone: true,
+        bio: true,
+        createdAt: true,
+      },
       order: { name: 'ASC' },
     });
   }
@@ -43,11 +64,11 @@ export class UsersService {
       id: s.id,
       name: s.name,
       email: s.email,
-      department: s.department || 'General',
-      specialization: s.specialization || 'General',
-      experience: s.experience || 0,
-      phone: s.phone || '',
-      bio: s.bio || '',
+      department: s.department,
+      specialization: s.specialization,
+      experience: s.experience,
+      phone: s.phone,
+      bio: s.bio,
       createdAt: s.createdAt,
       rating: 4.5,
       reviews: Math.floor(30 + Math.random() * 100),
@@ -62,7 +83,7 @@ export class UsersService {
       throw new ConflictException('Email already exists');
     }
     
-    const hashedPassword = await bcrypt.hash(staffData.password, 10);
+    const hashedPassword = await bcrypt.hash(staffData.password, 10);  // ✅ bcryptjs works
     
     const staff = this.userRepo.create({
       name: staffData.name,
@@ -75,13 +96,14 @@ export class UsersService {
       phone: staffData.phone,
       bio: staffData.bio,
       isActive: true,
-      isDeactivated: false,
       emailVerified: true,
+      status: UserStatus.ACTIVE,
     });
     
     const savedStaff = await this.userRepo.save(staff);
     this.logger.log(`Created staff member: ${staffData.email}`);
     
+    // Remove password from response
     const { password, ...result } = savedStaff;
     return result as User;
   }
@@ -100,8 +122,7 @@ export class UsersService {
     const updatedUser = await this.userRepo.save(user);
     this.logger.log(`Updated profile for user ${user.email}`);
     
-    const { password, ...result } = updatedUser;
-    return result as User;
+    return updatedUser;
   }
 
   async delete(id: number): Promise<void> {
@@ -128,25 +149,27 @@ export class UsersService {
       .orderBy('user.createdAt', 'DESC')
       .getManyAndCount();
 
-    // Remove passwords from response
-    const sanitizedData = data.map(({ password, ...rest }) => rest as User);
-
     return {
-      data: sanitizedData,
+      data,
       total,
       page,
       totalPages: Math.ceil(total / limit),
     };
   }
 
+  async findAllUsers(): Promise<User[]> {
+    return this.userRepo.find({
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async changePassword(userId: number, oldPassword: string, newPassword: string): Promise<boolean> {
     const user = await this.findByIdWithPassword(userId);
     if (!user) return false;
     
-    const isValid = await bcrypt.compare(oldPassword, user.password);
+    const isValid = await bcrypt.compare(oldPassword, user.password);  // ✅ bcryptjs works
     if (!isValid) return false;
     
-    // Validate new password strength
     if (newPassword.length < 8) {
       throw new BadRequestException('Password must be at least 8 characters');
     }
@@ -160,8 +183,7 @@ export class UsersService {
       throw new BadRequestException('Password must contain at least one number');
     }
     
-    user.password = await bcrypt.hash(newPassword, 10);
-    user.passwordChangedAt = new Date();
+    user.password = await bcrypt.hash(newPassword, 10);  // ✅ bcryptjs works
     await this.userRepo.save(user);
     
     this.logger.log(`Password changed for user ${user.email}`);
@@ -249,7 +271,6 @@ export class UsersService {
       return { locked: true, remainingMinutes };
     }
     
-    // Clear lock if expired
     if (user.lockUntil && user.lockUntil <= new Date()) {
       user.lockUntil = null;
       user.failedLoginAttempts = 0;

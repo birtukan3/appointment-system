@@ -30,7 +30,6 @@ export default function UserDashboard() {
   const [sortField, setSortField] = useState("datetime");
   const [sortOrder, setSortOrder] = useState("desc");
   
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalItems, setTotalItems] = useState(0);
@@ -56,17 +55,17 @@ export default function UserDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showWelcomeAnimation, setShowWelcomeAnimation] = useState(true);
   const [recentActivity, setRecentActivity] = useState([]);
-  const [techTips] = useState([
+  
+  const techTips = [
     { icon: "💻", text: "Take a 5-minute break every hour to prevent eye strain", color: "bg-blue-100 text-blue-600" },
     { icon: "🧠", text: "Use the Pomodoro technique: 25 min work, 5 min break", color: "bg-indigo-100 text-indigo-600" },
     { icon: "☕", text: "Stay hydrated - coffee breaks improve productivity", color: "bg-amber-100 text-amber-600" },
     { icon: "🎧", text: "Noise-cancelling headphones boost focus by 40%", color: "bg-purple-100 text-purple-600" },
     { icon: "⚡", text: "Keyboard shortcuts save 8+ days per year", color: "bg-green-100 text-green-600" },
     { icon: "🔋", text: "Charge your laptop to 80% for longer battery life", color: "bg-cyan-100 text-cyan-600" }
-  ]);
-  const [productivityScore, setProductivityScore] = useState(0);
+  ];
   
-  // ✅ Toast prevention refs
+  const [productivityScore, setProductivityScore] = useState(0);
   const toastShownRef = useRef(false);
   const toastTimeoutRef = useRef(null);
   const isFetchingRef = useRef(false);
@@ -95,7 +94,7 @@ export default function UserDashboard() {
     return () => clearTimeout(timer);
   }, []);
 
-  // ============ CALCULATE STATS FROM BOOKINGS (No API calls) ============
+  // ============ CALCULATE STATS FROM BOOKINGS ============
   const calculateStatsFromBookings = useCallback((bookingsData) => {
     const now = new Date();
     const upcoming = bookingsData.filter(b => {
@@ -117,13 +116,11 @@ export default function UserDashboard() {
       upcoming: upcoming,
     });
     
-    // Calculate productivity score
     const rate = bookingsData.length > 0 
       ? Math.round(((completed + bookingsData.filter(b => (b.status || '').toLowerCase() === 'approved').length) / bookingsData.length) * 100) 
       : 0;
     setProductivityScore(Math.min(98, rate + 10));
     
-    // Generate recent activity from bookings
     const activities = bookingsData.slice(0, 5).map(booking => ({
       id: booking.id,
       type: booking.status === 'pending' ? 'created' : booking.status === 'approved' ? 'approved' : 'updated',
@@ -133,9 +130,8 @@ export default function UserDashboard() {
     setRecentActivity(activities);
   }, []);
 
-  // ============ FETCH BOOKINGS ONLY (Single API call) ============
+  // ============ FETCH BOOKINGS ============
   const fetchBookings = useCallback(async () => {
-    // ✅ Prevent multiple simultaneous calls
     if (isFetchingRef.current) return;
     
     try {
@@ -156,7 +152,6 @@ export default function UserDashboard() {
         params.append('search', searchTerm.trim());
       }
       
-      // Use the correct endpoint
       const response = await api.get(`/appointments/my?${params.toString()}`);
       
       if (response?.data) {
@@ -164,11 +159,7 @@ export default function UserDashboard() {
         setBookings(bookingsData);
         setTotalItems(response.data.total || response.data.totalItems || bookingsData.length);
         setTotalPages(response.data.totalPages || Math.ceil((response.data.total || bookingsData.length) / itemsPerPage));
-        
-        // Calculate all stats from bookings data
         calculateStatsFromBookings(bookingsData);
-        
-        // Reset toast flag on success
         toastShownRef.current = false;
         if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
         setConnectionError(false);
@@ -180,7 +171,6 @@ export default function UserDashboard() {
       setTotalItems(0);
       setTotalPages(0);
       
-      // ✅ ONLY SHOW TOAST ONCE
       if (!toastShownRef.current) {
         toastShownRef.current = true;
         toast.error("Failed to load bookings. Please refresh.");
@@ -194,16 +184,26 @@ export default function UserDashboard() {
     }
   }, [currentPage, itemsPerPage, filter, searchTerm, sortField, sortOrder, calculateStatsFromBookings]);
 
-  // Load data when dependencies change
+  // ============ REDIRECT BASED ON ROLE ============
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
       router.push("/login");
       return;
     }
-    if (user?.role !== "user") {
-      if (user?.role === "admin") router.push("/admin");
-      if (user?.role === "staff") router.push("/staff");
+    
+    // ✅ Enhanced role-based redirect
+    const role = user?.role?.toLowerCase();
+    if (role === 'admin') {
+      router.push("/admin");
+      return;
+    }
+    if (role === 'staff') {
+      router.push("/staff");
+      return;
+    }
+    if (role !== 'user') {
+      router.push("/dashboard");
       return;
     }
     
@@ -233,13 +233,12 @@ export default function UserDashboard() {
     }
   };
 
-  // Handle filter change
+  // Filter handlers
   const handleFilterChange = (newFilter) => {
     setFilter(newFilter);
     setCurrentPage(1);
   };
 
-  // Handle search
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
     setCurrentPage(1);
@@ -250,7 +249,6 @@ export default function UserDashboard() {
     setCurrentPage(1);
   };
 
-  // Handle sort change
   const handleSort = (field) => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
@@ -261,7 +259,7 @@ export default function UserDashboard() {
     setCurrentPage(1);
   };
 
-  // Pagination handlers
+  // Pagination
   const goToPage = (page) => {
     if (page >= 1 && page <= totalPages) {
       setCurrentPage(page);
@@ -271,7 +269,6 @@ export default function UserDashboard() {
   const goToPreviousPage = () => goToPage(currentPage - 1);
   const goToNextPage = () => goToPage(currentPage + 1);
 
-  // Generate pagination buttons
   const getPaginationButtons = () => {
     const buttons = [];
     const maxButtons = 5;

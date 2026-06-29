@@ -8,52 +8,59 @@ import {
   User, Mail, Building2, Phone, Save, ArrowLeft, AlertCircle, 
   Briefcase, Loader, CheckCircle, RefreshCw, Sparkles, Shield, 
   Key, Fingerprint, Bell, Calendar, Clock, Award, TrendingUp,
-  CalendarCheck, Clock8, Camera, Upload, X, Eye, EyeOff, Trash2
+  CalendarCheck, Clock8, Camera, Upload, X, Eye, EyeOff, Trash2,
+  Lock, UserX
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-// Toast debouncing - PREVENT profile success toasts completely
-let toastDebounceTimer = null;
-let lastToastMessage = '';
-let lastToastTime = 0;
+// ============================================
+// TOAST MANAGER
+// ============================================
+const ToastManager = {
+  lastMessage: '',
+  lastTime: 0,
+  timer: null,
+  showing: false,
 
-const showToast = (message, type = 'success', duration = 3000) => {
-  if (message === 'Profile updated successfully!') {
-    console.log('[TOAST BLOCKED] Profile update message suppressed');
-    return;
-  }
-  
-  if (message.toLowerCase().includes('profile') && message.toLowerCase().includes('success')) {
-    console.log('[TOAST BLOCKED] Profile-related success message suppressed');
-    return;
-  }
-  
-  const now = Date.now();
-  
-  if (toastDebounceTimer) {
-    clearTimeout(toastDebounceTimer);
-  }
-  
-  if (lastToastMessage === message && (now - lastToastTime) < 2000) {
-    return;
-  }
-  
-  lastToastMessage = message;
-  lastToastTime = now;
-  
-  if (type === 'success') {
-    toast.success(message, { duration });
-  } else if (type === 'error') {
-    toast.error(message, { duration });
-  } else if (type === 'info') {
-    toast(message, { icon: 'ℹ️', duration });
+  show(message, type = 'success', duration = 3000) {
+    if (message && message.toLowerCase().includes('profile updated')) {
+      console.log('[TOAST BLOCKED] Profile success toast suppressed');
+      return;
+    }
+    
+    const now = Date.now();
+    if (this.lastMessage === message && (now - this.lastTime) < 3000) return;
+    if (this.showing) return;
+    
+    this.lastMessage = message;
+    this.lastTime = now;
+    this.showing = true;
+    
+    if (type === 'success') {
+      toast.success(message, { duration });
+    } else if (type === 'error') {
+      toast.error(message, { duration });
+    } else {
+      toast(message, { icon: 'ℹ️', duration });
+    }
+    
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.showing = false;
+    }, duration + 500);
+  },
+
+  clear() {
+    if (this.timer) clearTimeout(this.timer);
+    this.showing = false;
   }
 };
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user, isAuthenticated, loading: authLoading, updateUser } = useContext(AppContext);
+  const { user, isAuthenticated, loading: authLoading, updateUser, logout } = useContext(AppContext);
   
+  // ============ STATE ============
   const [profile, setProfile] = useState({ 
     name: '', email: '', company: '', phone: '', department: '', 
     avatar: null, preferences: { theme: 'light', notifications: true }
@@ -64,9 +71,27 @@ export default function ProfilePage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [isChanged, setIsChanged] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
+  
+  // ============ MODALS ============
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAvatarUpload, setShowAvatarUpload] = useState(false);
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  
+  // ============ LOADING STATES ============
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPasswordSubmitting, setIsPasswordSubmitting] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
+  
+  // ============ FORM DATA ============
+  const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' });
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState(0);
+  const [deactivateReason, setDeactivateReason] = useState('');
+  
+  // ============ STATS ============
   const [stats, setStats] = useState({ 
     totalAppointments: 0, 
     completedAppointments: 0, 
@@ -74,23 +99,30 @@ export default function ProfilePage() {
     upcomingAppointments: 0, 
     memberSince: '' 
   });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPasswordSubmitting, setIsPasswordSubmitting] = useState(false);
   
-  const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' });
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [passwordStrength, setPasswordStrength] = useState(0);
-  
+  // ============ REFS ============
   const fileInputRef = useRef(null);
   const isMounted = useRef(true);
   const successTimeoutRef = useRef(null);
+  const isSubmittingRef = useRef(false);
+  const hasLoadedRef = useRef(false);
+  const isPasswordSubmittingRef = useRef(false);
 
+  // ============ GREETING ============
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return '🌅 Good Morning';
+    if (hour < 18) return '☀️ Good Afternoon';
+    return '🌙 Good Evening';
+  }, []);
+
+  // ============ API CALLS ============
   const fetchUserStats = useCallback(async () => {
     try {
-      const statsResponse = await api.get('/appointments/stats');
-      const appointmentsResponse = await api.get('/appointments/my', { limit: 100 });
+      const [statsResponse, appointmentsResponse] = await Promise.all([
+        api.get('/appointments/stats'),
+        api.get('/appointments/my', { limit: 100 })
+      ]);
       
       let appointments = [];
       if (Array.isArray(appointmentsResponse.data)) {
@@ -100,15 +132,12 @@ export default function ProfilePage() {
       }
       
       const now = new Date();
-      
       const completed = appointments.filter(a => 
         a.status === 'approved' && new Date(a.datetime) < now
       ).length;
-      
       const pending = appointments.filter(a => 
         a.status === 'pending'
       ).length;
-      
       const upcoming = appointments.filter(a => 
         a.status === 'approved' && new Date(a.datetime) > now
       ).length;
@@ -127,6 +156,51 @@ export default function ProfilePage() {
     }
   }, [user]);
 
+  const loadProfile = useCallback(async () => {
+    if (hasLoadedRef.current) return;
+    
+    try {
+      hasLoadedRef.current = true;
+      const response = await api.get('/users/profile');
+      const userData = response.data?.data || response.data || response;
+      
+      const userProfile = { 
+        name: userData.name || user?.name || user?.firstName || '', 
+        email: userData.email || user?.email || '', 
+        company: userData.company || user?.company || '', 
+        phone: userData.phone || user?.phone || '', 
+        department: userData.department || user?.department || '',
+        avatar: userData.avatar || user?.avatar || null,
+        preferences: userData.preferences || user?.preferences || { theme: 'light', notifications: true }
+      };
+      
+      if (isMounted.current) {
+        setProfile(userProfile);
+        setOriginalProfile(userProfile);
+      }
+      
+      if (updateUser && userData.id) {
+        updateUser(userData);
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+      if (user && isMounted.current) {
+        const userProfile = { 
+          name: user.name || user.firstName || '', 
+          email: user.email || '', 
+          company: user.company || '', 
+          phone: user.phone || '', 
+          department: user.department || '',
+          avatar: user.avatar || null,
+          preferences: user.preferences || { theme: 'light', notifications: true }
+        };
+        setProfile(userProfile);
+        setOriginalProfile(userProfile);
+      }
+    }
+  }, [user, updateUser]);
+
+  // ============ EFFECTS ============
   useEffect(() => {
     isMounted.current = true;
     
@@ -136,57 +210,19 @@ export default function ProfilePage() {
       return; 
     }
     
-    const loadProfile = async () => {
-      try {
-        const response = await api.get('/users/profile');
-        const userData = response.data || response;
-        
-        const userProfile = { 
-          name: userData.name || user?.name || user?.firstName || '', 
-          email: userData.email || user?.email || '', 
-          company: userData.company || user?.company || '', 
-          phone: userData.phone || user?.phone || '', 
-          department: userData.department || user?.department || '',
-          avatar: userData.avatar || user?.avatar || null,
-          preferences: userData.preferences || user?.preferences || { theme: 'light', notifications: true }
-        };
-        
-        if (isMounted.current) {
-          setProfile(userProfile);
-          setOriginalProfile(userProfile);
-        }
-        
-        if (updateUser && userData.id) {
-          updateUser(userData);
-        }
-      } catch (error) {
-        console.error('Failed to load profile:', error);
-        if (user && isMounted.current) {
-          const userProfile = { 
-            name: user.name || user.firstName || '', 
-            email: user.email || '', 
-            company: user.company || '', 
-            phone: user.phone || '', 
-            department: user.department || '',
-            avatar: user.avatar || null,
-            preferences: user.preferences || { theme: 'light', notifications: true }
-          };
-          setProfile(userProfile);
-          setOriginalProfile(userProfile);
-        }
-      }
-    };
-    
     loadProfile();
     fetchUserStats();
     
     return () => {
       isMounted.current = false;
+      hasLoadedRef.current = false;
+      ToastManager.clear();
       if (successTimeoutRef.current) {
         clearTimeout(successTimeoutRef.current);
       }
     };
-  }, [authLoading, isAuthenticated, user, router, updateUser, fetchUserStats]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, isAuthenticated]);
 
   useEffect(() => {
     const hasChanged = profile.name !== originalProfile.name || 
@@ -207,7 +243,7 @@ export default function ProfilePage() {
         if (isMounted.current) {
           setShowSuccess(false);
         }
-      }, 3000);
+      }, 4000);
       return () => {
         if (successTimeoutRef.current) {
           clearTimeout(successTimeoutRef.current);
@@ -216,6 +252,7 @@ export default function ProfilePage() {
     }
   }, [showSuccess]);
 
+  // ============ UTILITY FUNCTIONS ============
   const checkPasswordStrength = useCallback((password) => {
     let strength = 0;
     if (password.length >= 8) strength++;
@@ -260,17 +297,19 @@ export default function ProfilePage() {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
+  // ============ HANDLERS ============
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (isSubmitting) return;
+    if (isSubmittingRef.current || isSubmitting) return;
     
     if (profile.phone && !validatePhone(profile.phone)) {
       setErrors({ phone: 'Please enter a valid Ethiopian phone number' });
-      showToast('Please enter a valid Ethiopian phone number', 'error');
+      ToastManager.show('Please enter a valid Ethiopian phone number', 'error');
       return;
     }
     
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setLoading(true);
     setErrors({});
@@ -281,75 +320,170 @@ export default function ProfilePage() {
       if (profile.company !== originalProfile.company) updateData.company = profile.company;
       if (profile.phone !== originalProfile.phone) updateData.phone = profile.phone;
       if (profile.department !== originalProfile.department) updateData.department = profile.department;
-      if (profile.preferences !== originalProfile.preferences) updateData.preferences = profile.preferences;
+      if (JSON.stringify(profile.preferences) !== JSON.stringify(originalProfile.preferences)) {
+        updateData.preferences = profile.preferences;
+      }
 
       if (Object.keys(updateData).length === 0) { 
-        showToast('No changes to save', 'info'); 
+        ToastManager.show('No changes to save', 'info');
+        isSubmittingRef.current = false;
         setIsSubmitting(false);
         setLoading(false);
         return; 
       }
 
       const response = await api.patch('/users/profile', updateData);
-      const updatedData = response.data || response;
       
-      if (updateUser) updateUser(updatedData);
-      setProfile(prev => ({ ...prev, ...updatedData }));
-      setOriginalProfile(prev => ({ ...prev, ...updatedData }));
+      if (response.data?.success === false) {
+        throw new Error(response.data.message || 'Update failed');
+      }
+      
+      const updatedData = response.data?.data || response.data || {};
+      
+      if (updateUser && updatedData.id) {
+        const updatedUser = {
+          ...user,
+          ...updatedData,
+          name: updatedData.name || user?.name,
+          company: updatedData.company || user?.company,
+          phone: updatedData.phone || user?.phone,
+          department: updatedData.department || user?.department,
+        };
+        updateUser(updatedUser);
+      }
+      
+      setProfile(prev => ({ 
+        ...prev, 
+        ...updatedData,
+        name: updatedData.name || prev.name,
+        company: updatedData.company || prev.company,
+        phone: updatedData.phone || prev.phone,
+        department: updatedData.department || prev.department,
+      }));
+      setOriginalProfile(prev => ({ 
+        ...prev, 
+        ...updatedData,
+        name: updatedData.name || prev.name,
+        company: updatedData.company || prev.company,
+        phone: updatedData.phone || prev.phone,
+        department: updatedData.department || prev.department,
+      }));
       
       setShowSuccess(true);
       
+      await fetchUserStats();
+      
     } catch (error) {
-      const errorMsg = error.response?.data?.message || 'Failed to update profile';
-      showToast(errorMsg, 'error');
+      console.error('❌ Update error:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Failed to update profile';
+      ToastManager.show(errorMsg, 'error');
       setErrors({ general: errorMsg });
     } finally { 
       setLoading(false);
       setIsSubmitting(false);
+      setTimeout(() => {
+        isSubmittingRef.current = false;
+      }, 1000);
     }
   };
 
+  // ✅ FIXED: Change Password Handler
   const handleChangePassword = async (e) => {
     e.preventDefault();
     
-    if (isPasswordSubmitting) return;
-    
-    if (!passwordData.current) {
-      showToast('Current password is required', 'error');
+    if (isPasswordSubmittingRef.current || isPasswordSubmitting) {
       return;
     }
     
+    // ✅ Validate current password
+    if (!passwordData.current || passwordData.current.trim() === '') {
+      ToastManager.show('Current password is required', 'error');
+      return;
+    }
+    
+    // ✅ Validate new password
+    if (!passwordData.new || passwordData.new.length < 8) {
+      ToastManager.show('Password must be at least 8 characters', 'error');
+      return;
+    }
+    
+    // ✅ Check if passwords match
     if (passwordData.new !== passwordData.confirm) {
-      showToast('New passwords do not match', 'error');
+      ToastManager.show('New passwords do not match', 'error');
       return;
     }
     
-    if (passwordData.new.length < 8) {
-      showToast('Password must be at least 8 characters', 'error');
-      return;
-    }
-    
+    // ✅ Check password strength
     if (passwordStrength < 3) {
-      showToast('Please choose a stronger password', 'error');
+      ToastManager.show('Please choose a stronger password', 'error');
       return;
     }
     
+    isPasswordSubmittingRef.current = true;
     setIsPasswordSubmitting(true);
+    
     try {
-      await api.post('/users/change-password', {
+      console.log('📤 Sending change password request...');
+      
+      const response = await api.post('/users/change-password', {
         currentPassword: passwordData.current,
         newPassword: passwordData.new
       });
-      showToast('Password changed successfully!', 'success');
+      
+      console.log('📥 Response:', response);
+      
+      if (response.data?.success === false) {
+        throw new Error(response.data.message || 'Failed to change password');
+      }
+      
+      ToastManager.show('Password changed successfully!', 'success');
+      
+      // ✅ Reset form
       setShowChangePassword(false);
       setPasswordData({ current: '', new: '', confirm: '' });
       setPasswordStrength(0);
+      
     } catch (error) {
-      console.error('Change password error:', error);
-      const errorMsg = error.response?.data?.message || 'Current password is incorrect';
-      showToast(errorMsg, 'error');
+      console.error('❌ Change password error:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Current password is incorrect';
+      ToastManager.show(errorMsg, 'error');
     } finally {
       setIsPasswordSubmitting(false);
+      isPasswordSubmittingRef.current = false;
+    }
+  };
+
+  // ✅ FIXED: Deactivate Account Handler
+  const handleDeactivate = async () => {
+    if (isDeactivating) return;
+    
+    setIsDeactivating(true);
+    try {
+      const response = await api.post('/users/deactivate', { 
+        reason: deactivateReason || 'User initiated deactivation' 
+      });
+      
+      if (response.data?.success === false) {
+        throw new Error(response.data.message || 'Failed to deactivate account');
+      }
+      
+      ToastManager.show('Account deactivated successfully', 'success');
+      setShowDeactivateModal(false);
+      
+      // ✅ Logout and redirect
+      if (logout) {
+        await logout();
+      } else {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
+      router.push('/login');
+      
+    } catch (error) {
+      console.error('❌ Deactivation error:', error);
+      ToastManager.show(error.message || 'Failed to deactivate account', 'error');
+    } finally {
+      setIsDeactivating(false);
     }
   };
 
@@ -359,12 +493,12 @@ export default function ProfilePage() {
     
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      showToast('Only image files are allowed (JPEG, PNG, GIF, WEBP)', 'error');
+      ToastManager.show('Only image files are allowed (JPEG, PNG, GIF, WEBP)', 'error');
       return;
     }
     
     if (file.size > 2 * 1024 * 1024) {
-      showToast('File size must be less than 2MB', 'error');
+      ToastManager.show('File size must be less than 2MB', 'error');
       return;
     }
     
@@ -379,11 +513,11 @@ export default function ProfilePage() {
       const newAvatar = response.data.avatar;
       setProfile(prev => ({ ...prev, avatar: newAvatar }));
       if (updateUser) updateUser({ ...user, avatar: newAvatar });
-      showToast('Profile picture updated!', 'success');
+      ToastManager.show('Profile picture updated!', 'success');
       setShowAvatarUpload(false);
     } catch (error) {
       console.error('Avatar upload error:', error);
-      showToast('Failed to upload avatar', 'error');
+      ToastManager.show('Failed to upload avatar', 'error');
     } finally {
       setUploadingAvatar(false);
     }
@@ -394,11 +528,11 @@ export default function ProfilePage() {
       await api.delete('/users/avatar');
       setProfile(prev => ({ ...prev, avatar: null }));
       if (updateUser) updateUser({ ...user, avatar: null });
-      showToast('Profile picture removed', 'success');
+      ToastManager.show('Profile picture removed', 'success');
       setShowAvatarUpload(false);
     } catch (error) {
       console.error('Remove avatar error:', error);
-      showToast('Failed to remove avatar', 'error');
+      ToastManager.show('Failed to remove avatar', 'error');
     }
   };
 
@@ -408,7 +542,7 @@ export default function ProfilePage() {
     try {
       setLoading(true);
       const response = await api.get('/users/profile');
-      const freshData = response.data || response;
+      const freshData = response.data?.data || response.data || response;
       const refreshedProfile = { 
         name: freshData.name || '', 
         email: freshData.email || '', 
@@ -422,10 +556,10 @@ export default function ProfilePage() {
       setProfile(refreshedProfile);
       setOriginalProfile(refreshedProfile);
       await fetchUserStats();
-      showToast('Profile refreshed', 'success');
+      ToastManager.show('Profile refreshed', 'success');
     } catch (error) { 
       console.error('Refresh error:', error);
-      showToast('Failed to refresh profile', 'error');
+      ToastManager.show('Failed to refresh profile', 'error');
     } finally {
       setLoading(false);
     }
@@ -437,6 +571,14 @@ export default function ProfilePage() {
     return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }, [stats.memberSince]);
 
+  const statsCards = [
+    { key: 'total', label: 'Total Appointments', value: stats.totalAppointments, icon: Calendar, color: 'from-blue-500 to-blue-600' },
+    { key: 'completed', label: 'Completed', value: stats.completedAppointments, icon: CheckCircle, color: 'from-green-500 to-green-600' },
+    { key: 'pending', label: 'Pending', value: stats.pendingAppointments, icon: Clock, color: 'from-amber-500 to-amber-600' },
+    { key: 'upcoming', label: 'Upcoming', value: stats.upcomingAppointments, icon: CalendarCheck, color: 'from-purple-500 to-purple-600' },
+  ];
+
+  // ============ LOADING ============
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
@@ -450,9 +592,11 @@ export default function ProfilePage() {
 
   if (!isAuthenticated) return null;
 
+  // ============ RENDER ============
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50 to-purple-50 py-8 relative">
-      {/* Toast Overlay Fix: Shifted banner position to a fixed layer so it cannot stack or break document layout */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-purple-50/30 py-8 relative">
+      
+      {/* ===== SUCCESS BANNER ===== */}
       {showSuccess && (
         <div className="fixed top-5 right-5 z-50 p-4 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl flex items-center gap-3 shadow-xl animate-fade-in-down max-w-sm">
           <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
@@ -463,46 +607,56 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {/* ===== BACKGROUND DECORATIONS ===== */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-20 left-10 w-72 h-72 bg-indigo-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
         <div className="absolute bottom-20 right-10 w-72 h-72 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
         <div className="absolute top-1/2 left-1/2 w-72 h-72 bg-pink-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
       </div>
 
-      <div className="relative max-w-6xl mx-auto px-4">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6 animate-slide-up flex-wrap gap-4">
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* ===== HEADER ===== */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2">
+              <User className="h-8 w-8 text-indigo-600" />
               Profile Settings
             </h1>
-            <p className="text-gray-500 mt-1">Manage your personal information and preferences</p>
+            <p className="text-gray-500 mt-1 flex items-center gap-2">
+              <span>{greeting}, {user?.firstName || 'User'}!</span>
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                {user?.role === 'admin' ? '👑 Admin' : user?.role === 'staff' ? '👨‍⚕️ Staff' : '👤 User'}
+              </span>
+            </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <button 
               onClick={handleRefresh} 
               disabled={loading}
-              className="flex items-center gap-2 text-gray-600 hover:text-indigo-600 bg-white px-4 py-2 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 group"
+              className="flex items-center gap-2 text-gray-600 hover:text-indigo-600 bg-white px-4 py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 group disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 group-hover:rotate-180 transition-transform duration-500 ${loading ? 'animate-spin' : ''}`} /> 
               <span className="hidden sm:inline">Refresh</span>
             </button>
             <button 
-              onClick={() => router.push(user?.role === 'admin' ? '/admin' : user?.role === 'staff' ? '/staff' : '/dashboard')} 
-              className="flex items-center gap-2 text-gray-600 hover:text-indigo-600 bg-white px-4 py-2 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 group"
+              onClick={() => router.push('/dashboard')} 
+              className="flex items-center gap-2 text-gray-600 hover:text-indigo-600 bg-white px-4 py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 group"
             >
               <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" /> 
-              <span className="hidden sm:inline">Back to Dashboard</span>
+              <span className="hidden sm:inline">Dashboard</span>
             </button>
           </div>
         </div>
         
-        {/* Two Column Layout */}
+        {/* ===== MAIN GRID ===== */}
         <div className="grid md:grid-cols-3 gap-6">
           
-          {/* Left Column - Profile Card & Stats */}
+          {/* ===== LEFT COLUMN ===== */}
           <div className="space-y-6">
             <div className="bg-white rounded-2xl shadow-xl overflow-hidden animate-scale-in">
+              
+              {/* Profile Header */}
               <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-8 relative overflow-hidden text-center">
                 <div className="absolute inset-0 opacity-20">
                   <div className="absolute top-0 right-0 w-64 h-64 bg-white rounded-full blur-3xl"></div>
@@ -510,7 +664,10 @@ export default function ProfilePage() {
                 </div>
                 <div className="relative">
                   <div className="relative inline-block">
-                    <div className="w-28 h-28 bg-white rounded-2xl flex items-center justify-center shadow-lg mx-auto relative group cursor-pointer" onClick={() => setShowAvatarUpload(true)}>
+                    <div 
+                      className="w-28 h-28 bg-white rounded-2xl flex items-center justify-center shadow-lg mx-auto relative group cursor-pointer transition-transform hover:scale-105" 
+                      onClick={() => setShowAvatarUpload(true)}
+                    >
                       {profile.avatar ? (
                         <img src={profile.avatar} alt="Avatar" className="w-full h-full object-cover rounded-2xl" />
                       ) : (
@@ -538,6 +695,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* Stats */}
               <div className="p-5 border-b border-gray-100">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="p-2 bg-indigo-100 rounded-lg">
@@ -546,41 +704,40 @@ export default function ProfilePage() {
                   <h3 className="font-semibold text-gray-900">Account Statistics</h3>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="text-center p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl">
-                    <Calendar className="h-5 w-5 text-indigo-600 mx-auto mb-1" />
-                    <p className="text-2xl font-bold text-gray-800">{stats.totalAppointments}</p>
-                    <p className="text-xs text-gray-500">Total Appointments</p>
-                  </div>
-                  <div className="text-center p-3 bg-gradient-to-r from-emerald-50 to-green-50 rounded-xl">
-                    <CheckCircle className="h-5 w-5 text-emerald-600 mx-auto mb-1" />
-                    <p className="text-2xl font-bold text-gray-800">{stats.completedAppointments}</p>
-                    <p className="text-xs text-gray-500">Completed</p>
-                  </div>
-                  <div className="text-center p-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl">
-                    <Clock8 className="h-5 w-5 text-amber-600 mx-auto mb-1" />
-                    <p className="text-2xl font-bold text-gray-800">{stats.pendingAppointments}</p>
-                    <p className="text-xs text-gray-500">Pending</p>
-                  </div>
-                  <div className="text-center p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
-                    <CalendarCheck className="h-5 w-5 text-purple-600 mx-auto mb-1" />
-                    <p className="text-2xl font-bold text-gray-800">{stats.upcomingAppointments}</p>
-                    <p className="text-xs text-gray-500">Upcoming</p>
-                  </div>
-                  <div className="text-center p-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl col-span-2">
-                    <Clock className="h-5 w-5 text-amber-600 mx-auto mb-1" />
-                    <p className="text-sm font-medium text-gray-700">Member since {memberSince}</p>
+                  {statsCards.map((stat) => {
+                    const Icon = stat.icon;
+                    return (
+                      <div key={stat.key} className={`text-center p-3 bg-gradient-to-r ${stat.color} rounded-xl text-white`}>
+                        <Icon className="h-5 w-5 mx-auto mb-1 opacity-80" />
+                        <p className="text-2xl font-bold">{stat.value}</p>
+                        <p className="text-xs opacity-80">{stat.label}</p>
+                      </div>
+                    );
+                  })}
+                  <div className="text-center p-3 bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl text-white col-span-2">
+                    <Clock className="h-5 w-5 mx-auto mb-1 opacity-80" />
+                    <p className="text-sm font-medium">Member since {memberSince}</p>
                   </div>
                 </div>
               </div>
 
+              {/* Actions */}
               <div className="p-5 space-y-2">
                 <button
                   onClick={() => setShowChangePassword(true)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl transition-all duration-300 text-gray-700 hover:text-indigo-600"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl transition-all duration-300 text-gray-700 hover:text-indigo-600 group"
                 >
-                  <Key className="h-4 w-4" />
+                  <Key className="h-4 w-4 group-hover:scale-110 transition-transform" />
                   <span>Change Password</span>
                   <Shield className="h-3 w-3 ml-auto text-gray-400" />
+                </button>
+                <button
+                  onClick={() => setShowDeactivateModal(true)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 bg-red-50 hover:bg-red-100 rounded-xl transition-all duration-300 text-red-600 group"
+                >
+                  <UserX className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                  <span>Deactivate Account</span>
+                  <AlertCircle className="h-3 w-3 ml-auto text-red-400" />
                 </button>
                 <button
                   disabled
@@ -594,19 +751,24 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Right Column - Profile Form */}
+          {/* ===== RIGHT COLUMN ===== */}
           <div className="md:col-span-2">
             <div className="bg-white rounded-2xl shadow-xl overflow-hidden animate-scale-in">
               <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
                 <div className="flex items-center gap-2">
                   <User className="h-5 w-5 text-indigo-600" />
                   <h2 className="text-lg font-semibold text-gray-900">Edit Profile</h2>
+                  <span className="ml-auto text-xs text-gray-400">
+                    {isChanged ? '⚠️ Unsaved changes' : '✅ All saved'}
+                  </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">Update your personal information</p>
               </div>
 
               <div className="p-6">
                 <form onSubmit={handleSubmit} className="space-y-5">
+                  
+                  {/* Name */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <User className="h-4 w-4 text-indigo-500" />
@@ -627,6 +789,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
 
+                  {/* Email - Disabled */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <Mail className="h-4 w-4 text-indigo-500" />
@@ -646,6 +809,7 @@ export default function ProfilePage() {
                     </p>
                   </div>
 
+                  {/* Company */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <Building2 className="h-4 w-4 text-indigo-500" />
@@ -665,6 +829,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
 
+                  {/* Phone */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <Phone className="h-4 w-4 text-indigo-500" />
@@ -694,6 +859,7 @@ export default function ProfilePage() {
                     )}
                   </div>
 
+                  {/* Department - Admin/Staff only */}
                   {(user?.role === 'admin' || user?.role === 'staff') && (
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
@@ -715,7 +881,8 @@ export default function ProfilePage() {
                     </div>
                   )}
 
-                  <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
+                  {/* Form Actions */}
+                  <div className="pt-4 border-t border-gray-100 flex flex-wrap justify-end gap-3">
                     <button
                       type="button"
                       disabled={!isChanged || loading}
@@ -737,9 +904,251 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
-
         </div>
       </div>
+
+      {/* ===== CHANGE PASSWORD MODAL ===== */}
+      {showChangePassword && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-100 rounded-lg">
+                  <Lock className="h-5 w-5 text-indigo-600" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-800">Change Password</h3>
+              </div>
+              <button onClick={() => { setShowChangePassword(false); setPasswordData({ current: '', new: '', confirm: '' }); setPasswordStrength(0); }} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              {/* Current Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Current Password</label>
+                <div className="relative">
+                  <input 
+                    type={showCurrentPassword ? "text" : "password"} 
+                    value={passwordData.current} 
+                    onChange={(e) => setPasswordData({ ...passwordData, current: e.target.value })} 
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition" 
+                    placeholder="Enter current password" 
+                    required 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)} 
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">New Password</label>
+                <div className="relative">
+                  <input 
+                    type={showNewPassword ? "text" : "password"} 
+                    value={passwordData.new} 
+                    onChange={(e) => { 
+                      setPasswordData({ ...passwordData, new: e.target.value });
+                      checkPasswordStrength(e.target.value);
+                    }} 
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition" 
+                    placeholder="Enter new password" 
+                    required 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setShowNewPassword(!showNewPassword)} 
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {passwordData.new && (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 flex-1 rounded-full ${strengthInfo.color}`} style={{ width: strengthInfo.width }}></div>
+                      <span className="text-xs font-medium text-slate-600">{strengthInfo.text}</span>
+                    </div>
+                    <ul className="text-xs text-slate-500 mt-1 space-y-0.5">
+                      <li className={passwordData.new.length >= 8 ? "text-green-500" : ""}>• Minimum 8 characters</li>
+                      <li className={/[A-Z]/.test(passwordData.new) ? "text-green-500" : ""}>• At least 1 uppercase letter</li>
+                      <li className={/[a-z]/.test(passwordData.new) ? "text-green-500" : ""}>• At least 1 lowercase letter</li>
+                      <li className={/[0-9]/.test(passwordData.new) ? "text-green-500" : ""}>• At least 1 number</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Confirm Password */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Confirm Password</label>
+                <div className="relative">
+                  <input 
+                    type={showConfirmPassword ? "text" : "password"} 
+                    value={passwordData.confirm} 
+                    onChange={(e) => setPasswordData({ ...passwordData, confirm: e.target.value })} 
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition ${passwordData.confirm && passwordData.confirm !== passwordData.new ? 'border-red-500' : 'border-slate-200'}`} 
+                    placeholder="Confirm new password" 
+                    required 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)} 
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {passwordData.confirm && passwordData.confirm !== passwordData.new && (
+                  <p className="text-red-500 text-xs mt-1">Passwords do not match</p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="submit" 
+                  disabled={isPasswordSubmitting || passwordData.new !== passwordData.confirm || passwordStrength < 3 || !passwordData.current} 
+                  className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-semibold hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isPasswordSubmitting ? <Loader className="h-5 w-5 animate-spin mx-auto" /> : 'Update Password'}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => { setShowChangePassword(false); setPasswordData({ current: '', new: '', confirm: '' }); setPasswordStrength(0); }} 
+                  className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-semibold hover:bg-slate-200 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== DEACTIVATE MODAL ===== */}
+      {showDeactivateModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
+            <div className="text-center mb-4">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <AlertCircle className="h-8 w-8 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800">Deactivate Account?</h3>
+              <p className="text-slate-500 text-sm mt-1">This action cannot be undone. All your data will be archived.</p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Reason (Optional)</label>
+                <textarea 
+                  value={deactivateReason} 
+                  onChange={(e) => setDeactivateReason(e.target.value)} 
+                  rows="3" 
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 bg-slate-50 focus:bg-white transition resize-none" 
+                  placeholder="Tell us why you're leaving..." 
+                />
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={handleDeactivate} 
+                  disabled={isDeactivating} 
+                  className="flex-1 bg-red-600 text-white py-3 rounded-xl font-semibold hover:bg-red-700 transition disabled:opacity-50"
+                >
+                  {isDeactivating ? <Loader className="h-5 w-5 animate-spin mx-auto" /> : 'Yes, Deactivate'}
+                </button>
+                <button 
+                  onClick={() => { setShowDeactivateModal(false); setDeactivateReason(''); }} 
+                  className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-semibold hover:bg-slate-200 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== AVATAR UPLOAD MODAL ===== */}
+      {showAvatarUpload && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in">
+            <div className="text-center">
+              <div className="w-24 h-24 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4 overflow-hidden">
+                {profile.avatar ? (
+                  <img src={profile.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="h-12 w-12 text-slate-400" />
+                )}
+              </div>
+              <h3 className="text-xl font-bold text-slate-800">Update Profile Picture</h3>
+              <p className="text-slate-500 text-sm mt-1">Upload a new profile picture</p>
+            </div>
+            <div className="space-y-3 mt-4">
+              <label className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-50 text-indigo-600 rounded-xl cursor-pointer hover:bg-indigo-100 transition w-full">
+                <Upload className="h-4 w-4" /> Choose Image
+                <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+              </label>
+              {profile.avatar && (
+                <button 
+                  onClick={removeAvatar} 
+                  disabled={uploadingAvatar} 
+                  className="flex items-center justify-center gap-2 px-4 py-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition w-full disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" /> Remove Picture
+                </button>
+              )}
+              <button 
+                onClick={() => setShowAvatarUpload(false)} 
+                className="w-full px-4 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition"
+              >
+                Cancel
+              </button>
+              {uploadingAvatar && (
+                <div className="flex items-center justify-center gap-2 text-slate-500">
+                  <Loader className="h-4 w-4 animate-spin" /> Uploading...
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== STYLES ===== */}
+      <style jsx>{`
+        @keyframes fade-in {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fade-in { animation: fade-in 0.2s ease-out; }
+        @keyframes blob {
+          0% { transform: translate(0px, 0px) scale(1); }
+          33% { transform: translate(30px, -50px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+          100% { transform: translate(0px, 0px) scale(1); }
+        }
+        .animate-blob { animation: blob 7s infinite; }
+        .animation-delay-2000 { animation-delay: 2s; }
+        .animation-delay-4000 { animation-delay: 4s; }
+        @keyframes slide-up {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-up { animation: slide-up 0.5s ease-out; }
+        @keyframes scale-in {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        .animate-scale-in { animation: scale-in 0.3s ease-out; }
+        @keyframes fade-in-down {
+          from { opacity: 0; transform: translateY(-20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-down { animation: fade-in-down 0.3s ease-out; }
+      `}</style>
     </div>
   );
 }
